@@ -1,441 +1,119 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Person Movement Tracker</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/posenet"></script>
+    <title>Object Tracking + Direction Commands</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-        
-        .container {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            margin-top: 20px;
-        }
-        
-        .video-container {
-            position: relative;
-            background: black;
-            border-radius: 10px;
-            overflow: hidden;
-        }
-        
-        #video {
-            width: 100%;
-            height: 400px;
-            object-fit: cover;
-        }
-        
-        .canvas-container {
-            position: relative;
-            background: black;
-            border-radius: 10px;
-            overflow: hidden;
-        }
-        
-        #output {
-            width: 100%;
-            height: 400px;
-        }
-        
-        .status-panel {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 20px;
-            border-radius: 10px;
-            backdrop-filter: blur(10px);
-        }
-        
-        .status-item {
-            margin: 15px 0;
-            padding: 10px;
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 5px;
-        }
-        
-        .direction {
-            font-size: 24px;
-            font-weight: bold;
-            text-align: center;
-            padding: 20px;
-            margin: 10px 0;
-            border-radius: 10px;
-            background: rgba(0, 0, 0, 0.3);
-        }
-        
-        .moving-left { color: #ff6b6b; }
-        .moving-right { color: #4ecdc4; }
-        .moving-close { color: #ffd93d; }
-        .moving-far { color: #6bcf7f; }
-        
-        button {
-            background: #4ecdc4;
-            color: white;
-            border: none;
-            padding: 15px 30px;
-            font-size: 16px;
-            border-radius: 25px;
-            cursor: pointer;
-            margin: 10px 0;
-            transition: all 0.3s ease;
-        }
-        
-        button:hover {
-            background: #45b7af;
-            transform: translateY(-2px);
-        }
-        
-        .instructions {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 15px;
-            border-radius: 10px;
-            margin-top: 20px;
-        }
-        
-        h1 {
-            text-align: center;
-            margin-bottom: 30px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        }
+        body { font-family: Arial; text-align: center; background: #111; color: #fff; }
+        #video, #canvas { width: 80%; max-width: 400px; margin-top: 10px; border-radius: 10px; }
+        #command { font-size: 22px; margin-top: 20px; font-weight: bold; }
     </style>
 </head>
 <body>
-    <h1>👤 Person Movement Tracker</h1>
-    
-    <div style="text-align: center;">
-        <button id="startBtn">🚀 Start Tracking</button>
-        <button id="stopBtn">⏹️ Stop Tracking</button>
-    </div>
-    
-    <div class="container">
-        <div class="video-container">
-            <video id="video" playsinline autoplay muted></video>
-        </div>
-        
-        <div class="canvas-container">
-            <canvas id="output"></canvas>
-        </div>
-    </div>
-    
-    <div class="status-panel">
-        <h2>📊 Tracking Status</h2>
-        
-        <div class="direction" id="directionDisplay">
-            Waiting for movement...
-        </div>
-        
-        <div class="status-item">
-            <strong>Horizontal Movement:</strong> 
-            <span id="horizontalStatus">-</span>
-        </div>
-        
-        <div class="status-item">
-            <strong>Distance:</strong> 
-            <span id="distanceStatus">-</span>
-        </div>
-        
-        <div class="status-item">
-            <strong>Confidence:</strong> 
-            <span id="confidenceStatus">-</span>
-        </div>
-        
-        <div class="status-item">
-            <strong>Position X:</strong> 
-            <span id="positionX">-</span>
-        </div>
-        
-        <div class="status-item">
-            <strong>Position Y:</strong> 
-            <span id="positionY">-</span>
-        </div>
-    </div>
-    
-    <div class="instructions">
-        <h3>🎯 How to use:</h3>
-        <p>• Click "Start Tracking" and allow camera access</p>
-        <p>• Stand in front of your webcam</p>
-        <p>• Move left/right to see direction detection</p>
-        <p>• Move closer/farther to see distance tracking</p>
-        <p>• Make sure you're in a well-lit area</p>
-    </div>
 
-    <script>
-        // Global variables
-        let video;
-        let output;
-        let ctx;
-        let net;
-        let isTracking = false;
-        let animationId;
-        
-        // Tracking history
-        let positionHistory = [];
-        const maxHistory = 10;
-        
-        // Thresholds
-        const MOVEMENT_THRESHOLD = 30;
-        const DISTANCE_THRESHOLD = 50;
-        
-        // DOM elements
-        const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const directionDisplay = document.getElementById('directionDisplay');
-        const horizontalStatus = document.getElementById('horizontalStatus');
-        const distanceStatus = document.getElementById('distanceStatus');
-        const confidenceStatus = document.getElementById('confidenceStatus');
-        const positionX = document.getElementById('positionX');
-        const positionY = document.getElementById('positionY');
+<h2>Object Tracking + Direction Detection</h2>
+<video id="video" autoplay playsinline></video>
+<canvas id="canvas"></canvas>
+<div id="command">Detecting...</div>
 
-        // Initialize the application
-        async function init() {
-            video = document.getElementById('video');
-            output = document.getElementById('output');
-            ctx = output.getContext('2d');
-            
-            // Set canvas size
-            output.width = 640;
-            output.height = 480;
-            
-            // Load PoseNet model
-            try {
-                net = await posenet.load({
-                    architecture: 'MobileNetV1',
-                    outputStride: 16,
-                    inputResolution: 257,
-                    multiplier: 0.75
-                });
-                console.log('PoseNet model loaded successfully');
-            } catch (error) {
-                console.error('Error loading PoseNet:', error);
-                alert('Error loading PoseNet model. Please check console for details.');
-            }
-            
-            // Event listeners
-            startBtn.addEventListener('click', startTracking);
-            stopBtn.addEventListener('click', stopTracking);
-        }
+<script>
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const commandBox = document.getElementById("command");
 
-        // Start tracking
-        async function startTracking() {
-            if (isTracking) return;
-            
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { width: 640, height: 480 }
-                });
-                
-                video.srcObject = stream;
-                isTracking = true;
-                startBtn.disabled = true;
-                stopBtn.disabled = false;
-                
-                // Wait for video to load
-                video.onloadedmetadata = () => {
-                    detectPose();
-                };
-                
-            } catch (error) {
-                console.error('Error accessing camera:', error);
-                alert('Cannot access camera. Please make sure you have a webcam connected and have granted permission.');
+    // Ask for camera
+    navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+        video.srcObject = stream;
+    });
+
+    video.addEventListener("loadeddata", () => {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        track();
+    });
+
+    function track() {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        let frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        let data = frame.data;
+
+        let targetColor = { r: 255, g: 0, b: 0 }; // TRACKING RED OBJECT
+        let threshold = 80;
+
+        let cx = 0, cy = 0, count = 0;
+
+        // Scan pixels
+        for (let i = 0; i < data.length; i += 4) {
+            let r = data[i];
+            let g = data[i + 1];
+            let b = data[i + 2];
+
+            if (Math.abs(r - targetColor.r) < threshold &&
+                Math.abs(g - targetColor.g) < threshold &&
+                Math.abs(b - targetColor.b) < threshold) {
+
+                let pixelIndex = i / 4;
+                let x = pixelIndex % canvas.width;
+                let y = Math.floor(pixelIndex / canvas.width);
+
+                cx += x;
+                cy += y;
+                count++;
+
+                // Mark detected pixel
+                data[i] = 0;    // color pixels blue
+                data[i + 1] = 0;
+                data[i + 2] = 255;
             }
         }
 
-        // Stop tracking
-        function stopTracking() {
-            isTracking = false;
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-            
-            if (animationId) {
-                cancelAnimationFrame(animationId);
-            }
-            
-            if (video.srcObject) {
-                video.srcObject.getTracks().forEach(track => track.stop());
-            }
-            
-            // Clear canvas
-            ctx.clearRect(0, 0, output.width, output.height);
-            
-            // Reset displays
-            directionDisplay.textContent = 'Tracking stopped';
-            directionDisplay.className = 'direction';
-            horizontalStatus.textContent = '-';
-            distanceStatus.textContent = '-';
-            confidenceStatus.textContent = '-';
-            positionX.textContent = '-';
-            positionY.textContent = '-';
+        ctx.putImageData(frame, 0, 0);
+
+        if (count > 50) {
+            cx /= count;
+            cy /= count;
+
+            // Draw center dot
+            ctx.beginPath();
+            ctx.arc(cx, cy, 10, 0, 2 * Math.PI);
+            ctx.fillStyle = "yellow";
+            ctx.fill();
+
+            checkDirection(cx, cy);
+        } else {
+            commandBox.innerText = "Object not found!";
         }
 
-        // Main pose detection function
-        async function detectPose() {
-            if (!isTracking) return;
-            
-            try {
-                // Get pose estimation
-                const pose = await net.estimateSinglePose(video, {
-                    flipHorizontal: false
-                });
-                
-                // Draw video frame to canvas
-                ctx.drawImage(video, 0, 0, output.width, output.height);
-                
-                if (pose.score > 0.3) {
-                    // Draw skeleton
-                    drawSkeleton(pose);
-                    
-                    // Get nose position (keypoint 0)
-                    const nose = pose.keypoints[0];
-                    
-                    if (nose.score > 0.5) {
-                        // Update tracking history
-                        updatePositionHistory(nose.position.x, nose.position.y, pose.score);
-                        
-                        // Analyze movement
-                        analyzeMovement();
-                        
-                        // Update displays
-                        updateDisplays(nose.position.x, nose.position.y, pose.score);
-                    }
-                }
-                
-                // Continue detection
-                animationId = requestAnimationFrame(detectPose);
-                
-            } catch (error) {
-                console.error('Error in pose detection:', error);
-                animationId = requestAnimationFrame(detectPose);
-            }
+        requestAnimationFrame(track);
+    }
+
+    function checkDirection(x, y) {
+        let midX = canvas.width / 2;
+        let midY = canvas.height / 2;
+
+        let tolerance = 40;
+
+        let cmd = "";
+
+        // LEFT / RIGHT
+        if (x < midX - tolerance) cmd += "Move Right (object is LEFT)\n";
+        else if (x > midX + tolerance) cmd += "Move Left (object is RIGHT)\n";
+        else cmd += "Aligned Left/Right\n";
+
+        // UP / DOWN (distance simulation)
+        if (y < midY - tolerance) cmd += "Move Forward (object UP)\n";
+        else if (y > midY + tolerance) cmd += "Move Backward (object DOWN)\n";
+        else cmd += "Aligned Up/Down\n";
+
+        // PERFECTLY CENTERED
+        if (Math.abs(x - midX) < tolerance && Math.abs(y - midY) < tolerance) {
+            cmd = "Object Centered ✔";
         }
 
-        // Draw skeleton on canvas
-        function drawSkeleton(pose) {
-            const keypoints = pose.keypoints;
-            
-            // Draw keypoints
-            keypoints.forEach(keypoint => {
-                if (keypoint.score > 0.3) {
-                    ctx.beginPath();
-                    ctx.arc(keypoint.position.x, keypoint.position.y, 4, 0, 2 * Math.PI);
-                    ctx.fillStyle = 'red';
-                    ctx.fill();
-                }
-            });
-            
-            // Define skeleton connections
-            const connections = [
-                [5, 6], [5, 7], [7, 9], [6, 8], [8, 10], [5, 11], [6, 12],
-                [11, 12], [11, 13], [13, 15], [12, 14], [14, 16]
-            ];
-            
-            // Draw connections
-            ctx.strokeStyle = 'green';
-            ctx.lineWidth = 2;
-            
-            connections.forEach(connection => {
-                const [start, end] = connection;
-                const startPoint = keypoints[start];
-                const endPoint = keypoints[end];
-                
-                if (startPoint.score > 0.3 && endPoint.score > 0.3) {
-                    ctx.beginPath();
-                    ctx.moveTo(startPoint.position.x, startPoint.position.y);
-                    ctx.lineTo(endPoint.position.x, endPoint.position.y);
-                    ctx.stroke();
-                }
-            });
-        }
+        commandBox.innerText = cmd;
+    }
+</script>
 
-        // Update position history for movement analysis
-        function updatePositionHistory(x, y, confidence) {
-            positionHistory.unshift({
-                x: x,
-                y: y,
-                confidence: confidence,
-                timestamp: Date.now()
-            });
-            
-            // Keep only recent history
-            if (positionHistory.length > maxHistory) {
-                positionHistory.pop();
-            }
-        }
-
-        // Analyze movement patterns
-        function analyzeMovement() {
-            if (positionHistory.length < 3) return;
-            
-            const current = positionHistory[0];
-            const previous = positionHistory[Math.min(2, positionHistory.length - 1)];
-            
-            // Calculate movement
-            const deltaX = current.x - previous.x;
-            const deltaY = current.y - previous.y;
-            
-            // Determine horizontal movement
-            let horizontalMovement = 'stable';
-            if (Math.abs(deltaX) > MOVEMENT_THRESHOLD) {
-                horizontalMovement = deltaX > 0 ? 'moving right' : 'moving left';
-            }
-            
-            // Determine distance change (using Y position as proxy for distance)
-            let distanceChange = 'stable';
-            if (Math.abs(deltaY) > DISTANCE_THRESHOLD) {
-                distanceChange = deltaY > 0 ? 'moving down' : 'moving up';
-            }
-            
-            // Convert vertical movement to distance terminology
-            let distanceStatusText = 'stable';
-            if (distanceChange === 'moving up') {
-                distanceStatusText = 'moving closer';
-            } else if (distanceChange === 'moving down') {
-                distanceStatusText = 'moving farther';
-            }
-            
-            // Update direction display with combined message
-            let displayText = '';
-            let directionClass = '';
-            
-            if (horizontalMovement !== 'stable' && distanceStatusText !== 'stable') {
-                displayText = `${horizontalMovement} and ${distanceStatusText}`;
-                directionClass = 'moving-combined';
-            } else if (horizontalMovement !== 'stable') {
-                displayText = horizontalMovement;
-                directionClass = horizontalMovement === 'moving left' ? 'moving-left' : 'moving-right';
-            } else if (distanceStatusText !== 'stable') {
-                displayText = distanceStatusText;
-                directionClass = distanceStatusText === 'moving closer' ? 'moving-close' : 'moving-far';
-            } else {
-                displayText = 'Stable position';
-                directionClass = '';
-            }
-            
-            directionDisplay.textContent = displayText;
-            directionDisplay.className = `direction ${directionClass}`;
-            
-            // Update status displays
-            horizontalStatus.textContent = horizontalMovement;
-            distanceStatus.textContent = distanceStatusText;
-        }
-
-        // Update all status displays
-        function updateDisplays(x, y, confidence) {
-            positionX.textContent = Math.round(x);
-            positionY.textContent = Math.round(y);
-            confidenceStatus.textContent = (confidence * 100).toFixed(1) + '%';
-        }
-
-        // Initialize when page loads
-        window.addEventListener('load', init);
-    </script>
 </body>
 </html>
