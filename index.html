@@ -488,6 +488,7 @@
                 document.getElementById('startBtn').classList.add('active');
                 
                 log('✅ Ready', 'success');
+                log('💡 Commands are always calculated - Click "FOLLOW ON" to send to ESP32', 'info');
                 updateDisplay('stateDisplay', 'READY', 'success');
                 
                 // Start detection - use requestAnimationFrame like reference
@@ -574,6 +575,11 @@
         }
 
         function toggleFollow() {
+            if (!systemRunning) {
+                log('⚠️ System not running!', 'warn');
+                return;
+            }
+            
             followActive = !followActive;
             const btn = document.getElementById('followBtn');
             
@@ -582,19 +588,23 @@
                 btn.classList.add('active');
                 btn.style.borderColor = '#0f0';
                 btn.style.color = '#0f0';
-                log('Follow mode ENABLED', 'success');
+                log('✅ FOLLOW ENABLED - Commands will be sent to ESP32', 'success');
                 
-                // Reset controllers
-                steerPID.reset();
-                speedPID.reset();
-                personTracker.reset();
+                // Check ESP32 IP
+                espIP = document.getElementById('espIP').value.trim();
+                if (!espIP) {
+                    log('⚠️ No ESP32 IP - Enter IP to send commands', 'warn');
+                    log('💡 Commands are still calculated and displayed', 'info');
+                } else {
+                    log(`📡 ESP32 IP: ${espIP} - Ready to control bot!`, 'success');
+                }
             } else {
                 btn.textContent = 'FOLLOW OFF';
                 btn.classList.remove('active');
                 btn.style.borderColor = '#888';
                 btn.style.color = '#888';
                 sendCommand(0, 0);
-                log('Follow mode DISABLED', 'warn');
+                log('⏸️ FOLLOW DISABLED - Commands displayed only', 'warn');
             }
         }
 
@@ -711,21 +721,26 @@
                     ctx.lineTo(smoothX, centerY);
                     ctx.stroke();
                     
-                    // Calculate control if following
-                    if (followActive) {
-                        calculateControl(smoothX, smoothSize, state);
-                    } else {
-                        sendCommand(0, 0);
-                    }
+                    // Calculate distance and offset (like reference code)
+                    const fcx = canvas.width / 2;
+                    const fcy = canvas.height / 2;
+                    const dx = smoothX - fcx;
+                    const dy = centerY - fcy;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
                     
                     // Update display
                     updateDisplay('targetX', smoothX.toFixed(0));
                     updateDisplay('targetSize', (smoothSize * 100).toFixed(1) + '%');
+                    updateDisplay('errorX', (dx).toFixed(0) + 'px');
+                    updateDisplay('errorSize', (dist).toFixed(0) + 'px');
                     const matchedPerson = people.find(p => 
                         Math.abs(p.bbox[0] - x) < 5 && 
                         Math.abs(p.bbox[1] - y) < 5
                     );
                     updateDisplay('confidence', matchedPerson ? (matchedPerson.score * 100).toFixed(0) + '%' : '-');
+                    
+                    // ALWAYS calculate commands (like reference code)
+                    processPerson(centerX, centerY, dx, dy, dist, state);
                     
                 } else {
                     lostFrames++;
@@ -741,12 +756,13 @@
                     ctx.fillText('NO PERSON DETECTED', canvas.width / 2, canvas.height / 2);
                     ctx.textAlign = 'left';
                     
-                    if (followActive) {
-                        sendCommand(0, 0);
-                    }
+                    // No person - send stop command
+                    sendCommand(0, 0);
                     
                     updateDisplay('targetX', 'LOST');
                     updateDisplay('targetSize', '-');
+                    updateDisplay('errorX', '-');
+                    updateDisplay('errorSize', '-');
                     updateDisplay('confidence', '-');
                     
                     // Log periodically when no person detected
@@ -763,72 +779,44 @@
             requestAnimationFrame(detect);
         }
 
-        // ============ CONTROL CALCULATION ============
-        function calculateControl(smoothX, smoothSize, state) {
-            const centerScreen = canvas.width / 2;
+        // ============ PROCESS PERSON - SIMPLIFIED LIKE REFERENCE CODE ============
+        function processPerson(cx, cy, dx, dy, dist, state) {
+            let drive = 0;
+            let steer = 0;
             
-            // Calculate errors
-            const errorX = (smoothX - centerScreen) / canvas.width; // Normalized -0.5 to 0.5
-            const errorSize = smoothSize - CONFIG.TARGET_SIZE;
-            
-            // Apply deadzone to errorX
-            let adjustedErrorX = errorX;
-            if (Math.abs(errorX) < CONFIG.CENTER_DEADZONE) {
-                adjustedErrorX = 0;
-            }
-            
-            // Apply deadzone to errorSize
-            let adjustedErrorSize = errorSize;
-            if (Math.abs(errorSize) < CONFIG.SIZE_DEADZONE) {
-                adjustedErrorSize = 0;
-            }
-            
-            // Update PID gains from UI with validation
-            const steerKp = validatePIDValue(document.getElementById('steerKp').value, 0, 100, 2.5);
-            const steerKd = validatePIDValue(document.getElementById('steerKd').value, 0, 100, 1.2);
-            const speedKp = validatePIDValue(document.getElementById('speedKp').value, 0, 1000, 200);
-            steerPID.setGains(steerKp, 0, steerKd);
-            speedPID.setGains(speedKp, 0, 10);
-            
-            // Calculate PID outputs
-            let steer = steerPID.update(adjustedErrorX);
-            let drive = speedPID.update(-adjustedErrorSize); // Negative because larger size = closer = back up
-            
-            // State-based adjustments
-            switch(state) {
-                case 'APPROACHING':
-                    drive = Math.max(drive, CONFIG.MIN_DRIVE); // Ensure minimum forward speed
-                    break;
-                case 'TOO_CLOSE':
-                    drive = Math.min(drive, 0); // Only allow backwards or stop
-                    break;
-                case 'FOLLOWING':
-                    // Normal operation
-                    break;
-                case 'SEARCHING':
-                case 'LOST':
+            // Simple control like reference code - ALWAYS calculate
+            if (followActive || true) { // Always calculate, but only send if followActive
+                // Steering: based on horizontal offset (like reference: dx/3)
+                steer = Math.round(Math.max(-100, Math.min(100, dx / 3)));
+                
+                // Drive: based on distance (like reference code)
+                if (dist > 150) {
+                    // Too far - move forward
+                    drive = Math.round(Math.min(100, 50 + (dist - 150) / 5));
+                } else if (dist < 100) {
+                    // Too close - move backward
+                    drive = -30;
+                } else {
+                    // Good distance - maintain position
                     drive = 0;
-                    steer = 0;
-                    break;
+                }
+                
+                // State-based adjustments
+                if (state === 'TOO_CLOSE') {
+                    drive = Math.min(drive, -20); // Force backward
+                } else if (state === 'APPROACHING') {
+                    drive = Math.max(drive, 25); // Ensure forward
+                }
             }
             
-            // Apply minimum drive threshold
-            if (Math.abs(drive) < CONFIG.MIN_DRIVE && Math.abs(drive) > 0) {
-                drive = drive > 0 ? CONFIG.MIN_DRIVE : -CONFIG.MIN_DRIVE;
-            }
-            
-            // Round for cleaner output
-            steer = Math.round(steer);
-            drive = Math.round(drive);
-            
-            // Send command
-            sendCommand(drive, steer);
-            
-            // Update display
-            updateDisplay('errorX', (errorX * 100).toFixed(1) + '%');
-            updateDisplay('errorSize', (errorSize * 100).toFixed(1) + '%');
+            // Update display ALWAYS
             updateDisplay('steerOut', steer, steer !== 0 ? 'warn' : '');
             updateDisplay('driveOut', drive, drive !== 0 ? 'warn' : '');
+            
+            // Send command only if followActive
+            if (followActive) {
+                sendCommand(drive, steer);
+            }
         }
 
         // ============ COMMUNICATION ============
@@ -837,6 +825,18 @@
         const MAX_CONSECUTIVE_ERRORS = 3;
         
         async function sendCommand(drive, steer) {
+            // Always update display with commands (even if not sending to ESP32)
+            updateDisplay('steerOut', steer, steer !== 0 ? 'warn' : '');
+            updateDisplay('driveOut', drive, drive !== 0 ? 'warn' : '');
+            
+            // If no ESP32 IP, just log the command (for testing)
+            if (!espIP || espIP.trim() === '') {
+                if (Math.abs(drive) > 0 || Math.abs(steer) > 0) {
+                    log(`📡 CMD: Drive=${drive} Steer=${steer} (No ESP32 IP)`, 'info');
+                }
+                return;
+            }
+            
             const now = Date.now();
             if (now - lastCommandTime < CONFIG.COMMAND_RATE) return;
             lastCommandTime = now;
@@ -859,6 +859,10 @@
                     if (connectionStatus !== 'connected') {
                         connectionStatus = 'connected';
                         updateConnectionStatus();
+                    }
+                    // Log successful commands periodically
+                    if (Math.abs(drive) > 0 || Math.abs(steer) > 0) {
+                        log(`📡 Sent: Drive=${drive} Steer=${steer}`, 'success');
                     }
                 } else {
                     consecutiveErrors++;
