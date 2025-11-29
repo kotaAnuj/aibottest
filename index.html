@@ -25,12 +25,18 @@
             height: 100%;
             object-fit: cover;
             transform: scaleX(-1);
+            z-index: 1;
+            background: #000;
+            display: block;
+            visibility: visible;
         }
         #canvas {
             position: absolute;
             width: 100%;
             height: 100%;
             transform: scaleX(-1);
+            z-index: 2;
+            pointer-events: none;
         }
         #controls {
             position: absolute;
@@ -186,7 +192,9 @@
         };
 
         // ============ GLOBAL STATE ============
-        let video, canvas, ctx;
+        const video = document.getElementById('videoElement');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
         let model = null;
         let systemRunning = false;
         let followActive = false;
@@ -427,177 +435,86 @@
             sizeFilter = new KalmanFilter1D(CONFIG.KALMAN_PROCESS_NOISE, CONFIG.KALMAN_MEASUREMENT_NOISE * 2);
         }
 
+        // ============ INITIALIZATION - SIMPLIFIED LIKE REFERENCE CODE ============
+        async function init() {
+            log('🚀 Starting...', 'info');
+            updateDisplay('stateDisplay', 'INITIALIZING', 'warn');
+            
+            try {
+                // Get ESP32 IP (optional - can start without it)
+                espIP = document.getElementById('espIP').value.trim();
+                if (espIP) {
+                    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+                    if (!ipRegex.test(espIP)) {
+                        log('⚠️ Invalid IP format (optional)', 'warn');
+                        espIP = '';
+                    }
+                }
+                
+                // Request camera - EXACTLY like reference code
+                log('📷 Requesting camera...', 'info');
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' }
+                });
+                
+                if (!stream) {
+                    throw new Error('No camera stream received');
+                }
+                
+                video.srcObject = stream;
+                log('✅ Camera stream assigned', 'success');
+                
+                // Wait for metadata - EXACTLY like reference code
+                await new Promise((resolve) => {
+                    video.onloadedmetadata = () => {
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        log(`✅ Camera ready: ${canvas.width}x${canvas.height}`, 'success');
+                        updateDisplay('stateDisplay', 'LOADING AI...', 'warn');
+                        resolve();
+                    };
+                });
+                
+                // Load AI model
+                log('🧠 Loading AI model...', 'info');
+                model = await cocoSsd.load();
+                log('✅ AI loaded', 'success');
+                
+                // Initialize controllers
+                initControllers();
+                
+                systemRunning = true;
+                document.getElementById('startBtn').textContent = 'STOP';
+                document.getElementById('startBtn').classList.add('active');
+                
+                log('✅ Ready', 'success');
+                updateDisplay('stateDisplay', 'READY', 'success');
+                
+                // Start detection - use requestAnimationFrame like reference
+                detect();
+                
+            } catch (e) {
+                log('❌ Error: ' + e.message, 'error');
+                console.error('Init error:', e);
+                updateDisplay('stateDisplay', 'ERROR', 'error');
+                
+                // Show helpful error messages
+                if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+                    log('💡 Please allow camera permissions', 'info');
+                } else if (e.name === 'NotFoundError') {
+                    log('💡 No camera found', 'info');
+                } else if (e.name === 'NotReadableError') {
+                    log('💡 Camera is being used by another app', 'info');
+                }
+            }
+        }
+        
         async function startSystem() {
             if (systemRunning) {
                 stopSystem();
                 return;
             }
-            
-            video = document.getElementById('videoElement');
-            canvas = document.getElementById('canvas');
-            ctx = canvas.getContext('2d');
-            espIP = document.getElementById('espIP').value.trim();
-            
-            if (!espIP) {
-                log('Enter ESP32 IP address first!', 'error');
-                return;
-            }
-            
-            // Validate IP format
-            const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
-            if (!ipRegex.test(espIP)) {
-                log('Invalid IP address format! Use format: 192.168.x.x', 'error');
-                return;
-            }
-            
-            // Check HTTPS requirement for production
-            if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-                log('⚠️ Camera requires HTTPS in production. Using localhost for development.', 'warn');
-            }
-            
-            log('Starting camera...', 'info');
-            
-            // Disable start button during initialization
-            const startBtn = document.getElementById('startBtn');
-            startBtn.disabled = true;
-            startBtn.textContent = 'INITIALIZING...';
-            
-            try {
-                // Try to get camera with multiple fallback strategies
-                let stream = null;
-                const constraints = [
-                    // Strategy 1: Try environment camera (back camera) with ideal resolution
-                    {
-                        video: { 
-                            width: { ideal: 1280 },
-                            height: { ideal: 720 },
-                            facingMode: { ideal: 'environment' }
-                        }
-                    },
-                    // Strategy 2: Try user camera (front camera) with ideal resolution
-                    {
-                        video: { 
-                            width: { ideal: 1280 },
-                            height: { ideal: 720 },
-                            facingMode: { ideal: 'user' }
-                        }
-                    },
-                    // Strategy 3: Try any camera with ideal resolution
-                    {
-                        video: { 
-                            width: { ideal: 1280 },
-                            height: { ideal: 720 }
-                        }
-                    },
-                    // Strategy 4: Try any camera with lower resolution
-                    {
-                        video: { 
-                            width: { ideal: 640 },
-                            height: { ideal: 480 }
-                        }
-                    },
-                    // Strategy 5: Try any available camera
-                    {
-                        video: true
-                    }
-                ];
-                
-                let lastError = null;
-                for (const constraint of constraints) {
-                    try {
-                        stream = await navigator.mediaDevices.getUserMedia(constraint);
-                        log(`Camera accessed successfully`, 'success');
-                        break;
-                    } catch (err) {
-                        lastError = err;
-                        continue;
-                    }
-                }
-                
-                if (!stream) {
-                    throw lastError || new Error('No camera available');
-                }
-                
-                // Stop any existing stream
-                if (video.srcObject) {
-                    video.srcObject.getTracks().forEach(track => track.stop());
-                }
-                
-                video.srcObject = stream;
-                
-                // Wait for video to be ready
-                await new Promise((resolve, reject) => {
-                    const timeout = setTimeout(() => {
-                        reject(new Error('Camera initialization timeout'));
-                    }, 10000);
-                    
-                    video.onloadedmetadata = () => {
-                        clearTimeout(timeout);
-                        canvas.width = video.videoWidth;
-                        canvas.height = video.videoHeight;
-                        
-                        // Ensure video is playing
-                        video.play().then(() => {
-                            log(`Camera ready: ${canvas.width}x${canvas.height}`, 'success');
-                            resolve();
-                        }).catch(reject);
-                    };
-                    
-                    video.onerror = (e) => {
-                        clearTimeout(timeout);
-                        reject(new Error('Video playback error'));
-                    };
-                });
-                
-                log('Loading AI model...', 'info');
-                
-                if (!model) {
-                    try {
-                        model = await cocoSsd.load();
-                        log('AI model loaded successfully!', 'success');
-                    } catch (modelError) {
-                        throw new Error(`Failed to load AI model: ${modelError.message}`);
-                    }
-                }
-                
-                initControllers();
-                
-                systemRunning = true;
-                startBtn.textContent = 'STOP';
-                startBtn.classList.add('active');
-                startBtn.disabled = false;
-                
-                log('System running! Enable FOLLOW to start tracking', 'success');
-                
-                detectionLoop();
-                
-            } catch (error) {
-                // Re-enable button on error
-                startBtn.disabled = false;
-                startBtn.textContent = 'START';
-                startBtn.classList.remove('active');
-                let errorMsg = 'Camera initialization failed: ';
-                if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-                    errorMsg += 'Camera permission denied. Please allow camera access and try again.';
-                } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-                    errorMsg += 'No camera found. Please connect a camera and try again.';
-                } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
-                    errorMsg += 'Camera is being used by another application. Please close other apps and try again.';
-                } else if (error.name === 'OverconstrainedError' || error.name === 'ConstraintNotSatisfiedError') {
-                    errorMsg += 'Camera does not support requested settings.';
-                } else {
-                    errorMsg += error.message;
-                }
-                log(errorMsg, 'error');
-                console.error('Camera error details:', error);
-                
-                // Show helpful message based on error type
-                if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-                    log('💡 Tip: Check browser settings and allow camera permissions', 'info');
-                } else if (error.name === 'NotFoundError') {
-                    log('💡 Tip: Make sure a camera is connected to your device', 'info');
-                }
-            }
+            init();
         }
 
         function stopSystem() {
@@ -681,62 +598,50 @@
             }
         }
 
-        // ============ DETECTION LOOP ============
-        let detectionErrorCount = 0;
-        const MAX_DETECTION_ERRORS = 5;
-        
-        async function detectionLoop() {
-            if (!systemRunning) return;
-            
-            // Check if video is still playing and ready
-            if (!video || !video.srcObject || video.readyState < 2) {
-                if (systemRunning) {
-                    log('Video not ready, waiting...', 'warn');
-                }
-                setTimeout(detectionLoop, 100);
+        // ============ DETECTION LOOP - SIMPLIFIED LIKE REFERENCE CODE ============
+        async function detect() {
+            if (!systemRunning || !model) {
+                requestAnimationFrame(detect);
                 return;
             }
             
-            if (video.paused || video.ended) {
-                log('Video stream lost, stopping detection', 'error');
-                stopSystem();
-                return;
-            }
-            
-            const startTime = performance.now();
+            // Clear canvas first
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
             
             try {
-                // Check if model is loaded
-                if (!model) {
-                    throw new Error('AI model not loaded');
-                }
-                
-                // Check if canvas is properly sized
-                if (canvas.width === 0 || canvas.height === 0) {
-                    throw new Error('Canvas not initialized');
-                }
-                
-                // Detect people
+                // Detect people - EXACTLY like reference code
                 const predictions = await model.detect(video);
                 const people = predictions.filter(p => 
                     p.class === 'person' && p.score >= CONFIG.MIN_CONFIDENCE
                 );
                 
-                // Reset error count on successful detection
-                detectionErrorCount = 0;
+                // FPS calculation
+                frameCount++;
+                if (Date.now() - lastFPSTime > 1000) {
+                    updateDisplay('fps', frameCount);
+                    frameCount = 0;
+                    lastFPSTime = Date.now();
+                }
                 
                 // Update tracker
                 const bbox = personTracker.update(people);
                 
-                // Clear canvas
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                
-                // Draw all detected people (for awareness)
-                people.forEach(person => {
+                // Draw all detected people (for awareness) - make them more visible
+                people.forEach((person, index) => {
                     const [x, y, w, h] = person.bbox;
-                    ctx.strokeStyle = 'rgba(255,255,0,0.3)';
-                    ctx.lineWidth = 2;
+                    // Draw bounding box
+                    ctx.strokeStyle = 'rgba(255,255,0,0.8)';
+                    ctx.lineWidth = 3;
                     ctx.strokeRect(x, y, w, h);
+                    
+                    // Draw label with confidence
+                    ctx.fillStyle = 'rgba(255,255,0,0.9)';
+                    ctx.font = '16px monospace';
+                    ctx.fillText(
+                        `Person ${index + 1}: ${(person.score * 100).toFixed(0)}%`,
+                        x,
+                        y > 20 ? y - 5 : y + 20
+                    );
                 });
                 
                 if (bbox) {
@@ -750,10 +655,14 @@
                         throw new Error('Invalid bounding box values');
                     }
                     
-                    // Draw target person
+                    // Draw target person - make it very visible
                     ctx.strokeStyle = '#00ff00';
-                    ctx.lineWidth = 4;
+                    ctx.lineWidth = 5;
                     ctx.strokeRect(x, y, w, h);
+                    
+                    // Draw filled rectangle with transparency
+                    ctx.fillStyle = 'rgba(0,255,0,0.1)';
+                    ctx.fillRect(x, y, w, h);
                     
                     // Calculate center
                     const centerX = x + w / 2;
@@ -788,6 +697,12 @@
                     ctx.stroke();
                     ctx.setLineDash([]);
                     
+                    // Draw center indicator
+                    ctx.fillStyle = 'rgba(0,255,255,0.8)';
+                    ctx.beginPath();
+                    ctx.arc(canvas.width / 2, canvas.height / 2, 5, 0, Math.PI * 2);
+                    ctx.fill();
+                    
                     // Draw offset line
                     ctx.strokeStyle = '#ffff00';
                     ctx.lineWidth = 2;
@@ -819,6 +734,13 @@
                     const state = stateMachine.updateState(false, 0);
                     updateDisplay('stateDisplay', state, 'error');
                     
+                    // Draw "No person detected" message on canvas
+                    ctx.fillStyle = 'rgba(255,0,0,0.7)';
+                    ctx.font = 'bold 24px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('NO PERSON DETECTED', canvas.width / 2, canvas.height / 2);
+                    ctx.textAlign = 'left';
+                    
                     if (followActive) {
                         sendCommand(0, 0);
                     }
@@ -826,38 +748,19 @@
                     updateDisplay('targetX', 'LOST');
                     updateDisplay('targetSize', '-');
                     updateDisplay('confidence', '-');
-                }
-                
-                // FPS calculation
-                frameCount++;
-                if (Date.now() - lastFPSTime > 1000) {
-                    updateDisplay('fps', frameCount);
-                    frameCount = 0;
-                    lastFPSTime = Date.now();
+                    
+                    // Log periodically when no person detected
+                    if (frameCount % 60 === 0) {
+                        log('No person detected in frame', 'warn');
+                    }
                 }
                 
             } catch (error) {
-                detectionErrorCount++;
-                if (detectionErrorCount <= MAX_DETECTION_ERRORS) {
-                    log(`Detection error: ${error.message}`, 'error');
-                }
-                
-                // If too many errors, stop the system
-                if (detectionErrorCount >= MAX_DETECTION_ERRORS) {
-                    log('Too many detection errors, stopping system', 'error');
-                    stopSystem();
-                    return;
-                }
+                console.error('Detection error:', error);
             }
             
-            const processingTime = performance.now() - startTime;
-            detectionTimes.push(processingTime);
-            if (detectionTimes.length > 10) detectionTimes.shift();
-            
-            const avgTime = detectionTimes.reduce((a,b) => a+b, 0) / detectionTimes.length;
-            const delay = Math.max(0, CONFIG.DETECTION_RATE - avgTime);
-            
-            setTimeout(detectionLoop, delay);
+            // Continue loop - EXACTLY like reference code
+            requestAnimationFrame(detect);
         }
 
         // ============ CONTROL CALCULATION ============
@@ -1058,21 +961,87 @@
             }
         }
 
+        // ============ DIAGNOSTICS ============
+        function checkCameraStatus() {
+            const status = {
+                videoElement: !!video,
+                videoSrcObject: !!(video && video.srcObject),
+                videoReadyState: video ? video.readyState : -1,
+                videoPaused: video ? video.paused : true,
+                videoEnded: video ? video.ended : true,
+                videoWidth: video ? video.videoWidth : 0,
+                videoHeight: video ? video.videoHeight : 0,
+                canvasWidth: canvas ? canvas.width : 0,
+                canvasHeight: canvas ? canvas.height : 0,
+                modelLoaded: !!model,
+                systemRunning: systemRunning,
+                videoVisible: video ? (video.offsetWidth > 0 && video.offsetHeight > 0) : false,
+                videoDisplay: video ? window.getComputedStyle(video).display : 'none',
+                videoVisibility: video ? window.getComputedStyle(video).visibility : 'hidden'
+            };
+            
+            log('=== Camera Diagnostics ===', 'info');
+            log(`Video element exists: ${status.videoElement}`, status.videoElement ? 'success' : 'error');
+            log(`Video stream active: ${status.videoSrcObject}`, status.videoSrcObject ? 'success' : 'error');
+            log(`Video readyState: ${status.videoReadyState} (2=HAVE_CURRENT_DATA, 4=HAVE_ENOUGH_DATA)`, 'info');
+            log(`Video paused: ${status.videoPaused}`, status.videoPaused ? 'error' : 'success');
+            log(`Video size: ${status.videoWidth}x${status.videoHeight}`, status.videoWidth > 0 ? 'success' : 'error');
+            log(`Video visible: ${status.videoVisible} (display: ${status.videoDisplay}, visibility: ${status.videoVisibility})`, status.videoVisible ? 'success' : 'error');
+            log(`Canvas size: ${status.canvasWidth}x${status.canvasHeight}`, status.canvasWidth > 0 ? 'success' : 'error');
+            log(`AI Model loaded: ${status.modelLoaded}`, status.modelLoaded ? 'success' : 'error');
+            log(`System running: ${status.systemRunning}`, status.systemRunning ? 'success' : 'warn');
+            log(`Detection processing: ${isProcessing}`, 'info');
+            
+            // Test video frame capture
+            if (video && video.readyState >= 2 && canvas.width > 0) {
+                try {
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    const imageData = ctx.getImageData(0, 0, 1, 1);
+                    const hasData = imageData.data.some(val => val !== 0);
+                    log(`Video frame capture test: ${hasData ? 'SUCCESS - frames are updating' : 'FAILED - no frame data'}`, hasData ? 'success' : 'error');
+                } catch (e) {
+                    log(`Video frame capture test failed: ${e.message}`, 'error');
+                }
+            }
+            
+            console.log('Full diagnostic status:', status);
+            return status;
+        }
+        
         // ============ INITIALIZATION ============
         // Initialize connection status on load
         window.addEventListener('DOMContentLoaded', () => {
             updateConnectionStatus();
             
-            // Load saved ESP32 IP if available
-            const savedIP = localStorage.getItem('esp32IP');
-            if (savedIP) {
-                document.getElementById('espIP').value = savedIP;
+            // Load saved ESP32 IP if available (with error handling for tracking prevention)
+            try {
+                const savedIP = localStorage.getItem('esp32IP');
+                if (savedIP) {
+                    document.getElementById('espIP').value = savedIP;
+                }
+                
+                // Save IP when changed
+                document.getElementById('espIP').addEventListener('change', (e) => {
+                    try {
+                        localStorage.setItem('esp32IP', e.target.value);
+                    } catch (err) {
+                        // Ignore localStorage errors (tracking prevention)
+                        console.log('LocalStorage not available (tracking prevention enabled)');
+                    }
+                });
+            } catch (err) {
+                // LocalStorage blocked - that's okay, just continue without saving
+                console.log('LocalStorage not available');
             }
             
-            // Save IP when changed
-            document.getElementById('espIP').addEventListener('change', (e) => {
-                localStorage.setItem('esp32IP', e.target.value);
-            });
+            // Add diagnostic button (for debugging)
+            const controls = document.getElementById('controls');
+            const diagBtn = document.createElement('button');
+            diagBtn.textContent = 'DIAGNOSTICS';
+            diagBtn.onclick = checkCameraStatus;
+            diagBtn.style.marginTop = '5px';
+            diagBtn.style.fontSize = '10px';
+            controls.appendChild(diagBtn);
         });
         
         // ============ CLEANUP ============
@@ -1092,6 +1061,9 @@
                 sendCommand(0, 0);
             }
         });
+        
+        // Auto-start like reference code
+        init();
     </script>
 </body>
 </html>
