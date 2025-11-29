@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Person Follower Pro</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: monospace; background: #000; color: #0f0; overflow: hidden; }
+        #container { position: relative; width: 100vw; height: 100vh; }
+        #videoElement { position: absolute; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); z-index: 1; }
+        #canvas { position: absolute; width: 100%; height: 100%; transform: scaleX(-1); z-index: 2; pointer-events: none; }
+        .panel { position: absolute; background: rgba(0,0,0,0.9); padding: 10px; border: 2px solid #0f0; border-radius: 5px; z-index: 100; }
+        #controls { top: 10px; left: 10px; width: 250px; }
+        #status { top: 10px; right: 10px; width: 280px; font-size: 12px; }
+        #log { bottom: 10px; left: 10px; width: 400px; max-height: 120px; overflow-y: auto; font-size: 11px; }
+        input { background: #000; color: #0f0; border: 1px solid #0f0; padding: 5px; width: 100%; margin: 5px 0; }
+        button { background: #000; color: #0f0; border: 2px solid #0f0; padding: 8px; margin: 3px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #0f0; color: #000; }
+        button.active { background: #0f0; color: #000; }
+        .row { display: flex; justify-content: space-between; margin: 3px 0; }
+        .label { color: #888; }
+        .value { color: #0f0; font-weight: bold; }
+        .warn { color: #ff0; }
+        .error { color: #f00; }
+        #joystick { position: absolute; bottom: 20px; right: 20px; width: 150px; height: 150px; background: rgba(0,0,0,0.8); border: 3px solid #0f0; border-radius: 50%; display: none; }
+        #joystick.active { display: block; }
+        #stick { position: absolute; width: 50px; height: 50px; background: #0f0; border: 2px solid #0ff; border-radius: 50%; top: 50%; left: 50%; transform: translate(-50%, -50%); cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <video id="videoElement" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+        
+        <div id="controls" class="panel">
+            <input type="text" id="espIP" placeholder="ESP32 IP: 192.168.1.100">
+            <div style="display: flex; flex-wrap: wrap;">
+                <button id="startBtn" onclick="startSystem()">START</button>
+                <button id="followBtn" onclick="toggleFollow()">FOLLOW</button>
+                <button id="remoteBtn" onclick="toggleRemote()">REMOTE</button>
+                <button onclick="emergencyStop()" style="border-color:#f00;color:#f00;">STOP</button>
+            </div>
+        </div>
+        
+        <div id="status" class="panel">
+            <div class="row"><span class="label">Mode:</span><span class="value" id="mode">IDLE</span></div>
+            <div class="row"><span class="label">ESP32:</span><span class="value" id="conn">OFF</span></div>
+            <div class="row"><span class="label">Target:</span><span class="value" id="target">NONE</span></div>
+            <div class="row"><span class="label">Position:</span><span class="value" id="pos">-</span></div>
+            <div class="row"><span class="label">Distance:</span><span class="value" id="dist">-</span></div>
+            <div class="row"><span class="label">Drive:</span><span class="value" id="drive">0</span></div>
+            <div class="row"><span class="label">Steer:</span><span class="value" id="steer">0</span></div>
+            <div class="row"><span class="label">FPS:</span><span class="value" id="fps">0</span></div>
+        </div>
+        
+        <div id="joystick">
+            <div id="stick"></div>
+        </div>
+        
+        <div id="log" class="panel"></div>
+    </div>
+
+    <script>
+        // ============ CONFIGURATION ============
+        const CONFIG = {
+            OPTIMAL_DISTANCE: 150,      // pixels - target distance
+            CENTER_DEADZONE: 0.08,      // 8% center deadzone
+            DISTANCE_DEADZONE: 30,      // pixels deadzone
+            
+            MAX_DRIVE: 100,
+            MAX_STEER: 100,
+            MIN_SPEED: 25,
+            
+            // PID Tuning
+            STEER_KP: 180,             // Steering proportional
+            STEER_KD: 40,              // Steering derivative
+            DRIVE_KP: 0.6,             // Drive proportional
+            DRIVE_KD: 0.2,             // Drive derivative
+            
+            COMMAND_RATE: 100,          // ms between commands
+            MIN_CONFIDENCE: 0.5,
+            LOST_TIMEOUT: 20,
+        };
+
+        // ============ GLOBAL STATE ============
+        const video = document.getElementById('videoElement');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        let model = null;
+        let systemRunning = false;
+        let followMode = false;
+        let remoteMode = false;
+        let espIP = '';
+        
+        let trackedPerson = null;
+        let lostFrames = 0;
+        
+        // PID state
+        let lastError = 0;
+        let lastDistError = 0;
+        let lastTime = Date.now();
+        
+        // Performance
+        let frameCount = 0;
+        let fpsTime = Date.now();
+        let lastCmdTime = 0;
+        
+        // Joystick
+        let joyActive = false;
+        let joyX = 0;
+        let joyY = 0;
+
+        // ============ INITIALIZATION ============
+        async function startSystem() {
+            if (systemRunning) {
+                stopSystem();
+                return;
+            }
+            
+            log('🚀 Starting system...', 'info');
+            espIP = document.getElementById('espIP').value.trim();
+            
+            try {
+                // Get camera
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment', width: 1280, height: 720 }
+                });
+                video.srcObject = stream;
+                
+                await new Promise(resolve => {
+                    video.onloadedmetadata = () => {
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        log(`📷 Camera: ${canvas.width}x${canvas.height}`, 'success');
+                        resolve();
+                    };
+                });
+                
+                // Load AI model
+                log('🧠 Loading AI model...', 'info');
+                model = await cocoSsd.load();
+                log('✅ Model loaded', 'success');
+                
+                systemRunning = true;
+                document.getElementById('startBtn').classList.add('active');
+                updateUI('mode', 'READY', '');
+                
+                detectLoop();
+                
+            } catch (e) {
+                log('❌ Error: ' + e.message, 'error');
+                updateUI('mode', 'ERROR', 'error');
+            }
+        }
+
+        function stopSystem() {
+            systemRunning = false;
+            followMode = false;
+            remoteMode = false;
+            
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(t => t.stop());
+            }
+            
+            sendCommand(0, 0);
+            
+            document.getElementById('startBtn').classList.remove('active');
+            document.getElementById('followBtn').classList.remove('active');
+            document.getElementById('remoteBtn').classList.remove('active');
+            document.getElementById('joystick').classList.remove('active');
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            updateUI('mode', 'STOPPED', 'warn');
+            log('⏹️ System stopped', 'warn');
+            
+            resetPID();
+        }
+
+        function toggleFollow() {
+            if (!systemRunning) {
+                log('⚠️ Start system first!', 'warn');
+                return;
+            }
+            
+            followMode = !followMode;
+            remoteMode = false;
+            
+            document.getElementById('followBtn').classList.toggle('active', followMode);
+            document.getElementById('remoteBtn').classList.remove('active');
+            document.getElementById('joystick').classList.remove('active');
+            
+            if (followMode) {
+                updateUI('mode', 'FOLLOW', '');
+                log('✅ FOLLOW mode active', 'success');
+                resetPID();
+            } else {
+                updateUI('mode', 'READY', '');
+                sendCommand(0, 0);
+                log('⏸️ Follow stopped', 'warn');
+            }
+        }
+
+        function toggleRemote() {
+            if (!systemRunning) {
+                log('⚠️ Start system first!', 'warn');
+                return;
+            }
+            
+            remoteMode = !remoteMode;
+            followMode = false;
+            
+            document.getElementById('remoteBtn').classList.toggle('active', remoteMode);
+            document.getElementById('followBtn').classList.remove('active');
+            document.getElementById('joystick').classList.toggle('active', remoteMode);
+            
+            if (remoteMode) {
+                updateUI('mode', 'REMOTE', '');
+                log('✅ REMOTE control active', 'success');
+                remoteLoop();
+            } else {
+                updateUI('mode', 'READY', '');
+                sendCommand(0, 0);
+                log('⏸️ Remote stopped', 'warn');
+            }
+        }
+
+        function emergencyStop() {
+            followMode = false;
+            remoteMode = false;
+            sendCommand(0, 0);
+            updateUI('mode', 'E-STOP', 'error');
+            log('🛑 EMERGENCY STOP', 'error');
+            
+            document.getElementById('followBtn').classList.remove('active');
+            document.getElementById('remoteBtn').classList.remove('active');
+            document.getElementById('joystick').classList.remove('active');
+        }
+
+        // ============ DETECTION LOOP ============
+        async function detectLoop() {
+            if (!systemRunning || !model) {
+                setTimeout(detectLoop, 100);
+                return;
+            }
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            try {
+                // Detect people
+                const predictions = await model.detect(video);
+                const people = predictions.filter(p => 
+                    p.class === 'person' && p.score >= CONFIG.MIN_CONFIDENCE
+                );
+                
+                // Update FPS
+                frameCount++;
+                if (Date.now() - fpsTime > 1000) {
+                    updateUI('fps', frameCount, '');
+                    frameCount = 0;
+                    fpsTime = Date.now();
+                }
+                
+                // Draw all detections
+                people.forEach((p, i) => {
+                    const [x, y, w, h] = p.bbox;
+                    ctx.strokeStyle = 'rgba(255,255,0,0.5)';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x, y, w, h);
+                    ctx.fillStyle = '#ff0';
+                    ctx.font = '12px monospace';
+                    ctx.fillText(`P${i+1}`, x, y-5);
+                });
+                
+                // Track person
+                let targetInfo = null;
+                
+                if (people.length > 0) {
+                    // Find tracked or largest person
+                    if (!trackedPerson) {
+                        trackedPerson = people.reduce((max, p) => 
+                            (p.bbox[2] * p.bbox[3] > max.bbox[2] * max.bbox[3]) ? p : max
+                        );
+                        log('🎯 Target locked', 'success');
+                    } else {
+                        // Track by IOU
+                        let bestMatch = null;
+                        let bestIOU = 0.2;
+                        
+                        for (const p of people) {
+                            const iou = calcIOU(trackedPerson.bbox, p.bbox);
+                            if (iou > bestIOU) {
+                                bestIOU = iou;
+                                bestMatch = p;
+                            }
+                        }
+                        
+                        if (bestMatch) {
+                            trackedPerson = bestMatch;
+                            lostFrames = 0;
+                        } else {
+                            lostFrames++;
+                        }
+                    }
+                    
+                    if (trackedPerson && lostFrames < CONFIG.LOST_TIMEOUT) {
+                        targetInfo = processTarget(trackedPerson);
+                        drawTarget(targetInfo);
+                    }
+                } else {
+                    lostFrames++;
+                }
+                
+                // Lost target
+                if (lostFrames >= CONFIG.LOST_TIMEOUT) {
+                    trackedPerson = null;
+                    updateUI('target', 'LOST', 'error');
+                    if (followMode) sendCommand(0, 0);
+                }
+                
+                // Follow mode control
+                if (followMode && targetInfo) {
+                    const cmd = calculateCommand(targetInfo);
+                    sendCommand(cmd.drive, cmd.steer);
+                }
+                
+                // Draw center crosshair
+                ctx.strokeStyle = 'rgba(0,255,255,0.3)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(canvas.width/2, 0);
+                ctx.lineTo(canvas.width/2, canvas.height);
+                ctx.moveTo(0, canvas.height/2);
+                ctx.lineTo(canvas.width, canvas.height/2);
+                ctx.stroke();
+                
+            } catch (err) {
+                console.error('Detection error:', err);
+            }
+            
+            setTimeout(detectLoop, 33); // ~30 FPS
+        }
+
+        // ============ TARGET PROCESSING ============
+        function processTarget(person) {
+            const [x, y, w, h] = person.bbox;
+            const centerX = x + w/2;
+            const centerY = y + h/2;
+            
+            const screenCenterX = canvas.width / 2;
+            const screenCenterY = canvas.height / 2;
+            
+            const posError = (centerX - screenCenterX) / screenCenterX;
+            const distance = Math.sqrt(
+                Math.pow(centerX - screenCenterX, 2) + 
+                Math.pow(centerY - screenCenterY, 2)
+            );
+            
+            updateUI('target', 'LOCKED', '');
+            updateUI('pos', `${Math.round(centerX)}, ${Math.round(centerY)}`, '');
+            updateUI('dist', `${Math.round(distance)}px`, '');
+            
+            return {
+                bbox: person.bbox,
+                centerX,
+                centerY,
+                posError,
+                distance,
+                confidence: person.score
+            };
+        }
+
+        function drawTarget(info) {
+            const [x, y, w, h] = info.bbox;
+            
+            // Green box
+            ctx.strokeStyle = '#0f0';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(x, y, w, h);
+            
+            // Crosshair
+            ctx.strokeStyle = '#f00';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(info.centerX - 20, info.centerY);
+            ctx.lineTo(info.centerX + 20, info.centerY);
+            ctx.moveTo(info.centerX, info.centerY - 20);
+            ctx.lineTo(info.centerX, info.centerY + 20);
+            ctx.stroke();
+            
+            // Info text
+            ctx.fillStyle = '#0f0';
+            ctx.font = 'bold 14px monospace';
+            ctx.fillText(`TRACKING ${Math.round(info.confidence*100)}%`, x, y-8);
+        }
+
+        // ============ PID CONTROL ============
+        function calculateCommand(info) {
+            const now = Date.now();
+            const dt = Math.max((now - lastTime) / 1000, 0.01);
+            
+            // STEERING CONTROL (left/right)
+            let steer = 0;
+            const absError = Math.abs(info.posError);
+            
+            if (absError > CONFIG.CENTER_DEADZONE) {
+                // PID for steering
+                const P = CONFIG.STEER_KP * info.posError;
+                const D = CONFIG.STEER_KD * (info.posError - lastError) / dt;
+                
+                steer = P + D;
+                steer = Math.max(-CONFIG.MAX_STEER, Math.min(CONFIG.MAX_STEER, steer));
+                
+                // Round to integer
+                steer = Math.round(steer);
+            }
+            
+            // DRIVE CONTROL (forward/backward)
+            let drive = 0;
+            const distError = info.distance - CONFIG.OPTIMAL_DISTANCE;
+            const absDistError = Math.abs(distError);
+            
+            if (absDistError > CONFIG.DISTANCE_DEADZONE) {
+                // PID for drive
+                const P = CONFIG.DRIVE_KP * distError;
+                const D = CONFIG.DRIVE_KD * (distError - lastDistError) / dt;
+                
+                drive = P + D;
+                drive = Math.max(-CONFIG.MAX_DRIVE, Math.min(CONFIG.MAX_DRIVE, drive));
+                
+                // Apply minimum speed threshold
+                if (Math.abs(drive) > 0 && Math.abs(drive) < CONFIG.MIN_SPEED) {
+                    drive = drive > 0 ? CONFIG.MIN_SPEED : -CONFIG.MIN_SPEED;
+                }
+                
+                drive = Math.round(drive);
+            }
+            
+            // Update PID state
+            lastError = info.posError;
+            lastDistError = distError;
+            lastTime = now;
+            
+            return { drive, steer };
+        }
+
+        function resetPID() {
+            lastError = 0;
+            lastDistError = 0;
+            lastTime = Date.now();
+        }
+
+        // ============ REMOTE CONTROL ============
+        function remoteLoop() {
+            if (!remoteMode) return;
+            
+            const drive = Math.round(-joyY * 100); // Invert Y
+            const steer = Math.round(joyX * 100);
+            
+            sendCommand(drive, steer);
+            
+            setTimeout(remoteLoop, CONFIG.COMMAND_RATE);
+        }
+
+        // ============ JOYSTICK ============
+        const stick = document.getElementById('stick');
+        const joystick = document.getElementById('joystick');
+        let centerX = 0, centerY = 0;
+        const maxDist = 50;
+
+        stick.addEventListener('mousedown', startJoy);
+        stick.addEventListener('touchstart', startJoy);
+        
+        document.addEventListener('mousemove', moveJoy);
+        document.addEventListener('touchmove', moveJoy);
+        
+        document.addEventListener('mouseup', endJoy);
+        document.addEventListener('touchend', endJoy);
+
+        function startJoy(e) {
+            e.preventDefault();
+            joyActive = true;
+            const rect = joystick.getBoundingClientRect();
+            centerX = rect.left + rect.width/2;
+            centerY = rect.top + rect.height/2;
+        }
+
+        function moveJoy(e) {
+            if (!joyActive) return;
+            e.preventDefault();
+            
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            
+            let dx = clientX - centerX;
+            let dy = clientY - centerY;
+            
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist > maxDist) {
+                dx = (dx/dist) * maxDist;
+                dy = (dy/dist) * maxDist;
+            }
+            
+            joyX = dx / maxDist;
+            joyY = dy / maxDist;
+            
+            stick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+        }
+
+        function endJoy(e) {
+            if (!joyActive) return;
+            e.preventDefault();
+            joyActive = false;
+            joyX = 0;
+            joyY = 0;
+            stick.style.transform = 'translate(-50%, -50%)';
+        }
+
+        // ============ COMMUNICATION ============
+        let connStatus = false;
+
+        async function sendCommand(drive, steer) {
+            const now = Date.now();
+            if (now - lastCmdTime < CONFIG.COMMAND_RATE) return;
+            lastCmdTime = now;
+            
+            updateUI('drive', drive, drive !== 0 ? 'warn' : '');
+            updateUI('steer', steer, steer !== 0 ? 'warn' : '');
+            
+            if (!espIP) {
+                updateUI('conn', 'NO IP', 'error');
+                return;
+            }
+            
+            try {
+                const url = `http://${espIP}/control?drive=${drive}&steer=${steer}`;
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 1000);
+                
+                const response = await fetch(url, {
+                    method: 'GET',
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeout);
+                
+                if (response.ok) {
+                    if (!connStatus) {
+                        connStatus = true;
+                        updateUI('conn', 'ONLINE', '');
+                        log('✅ ESP32 connected', 'success');
+                    }
+                }
+            } catch (err) {
+                if (connStatus) {
+                    connStatus = false;
+                    updateUI('conn', 'OFFLINE', 'error');
+                    log('❌ Connection lost', 'error');
+                }
+            }
+        }
+
+        // ============ UTILITIES ============
+        function calcIOU(box1, box2) {
+            const x1 = Math.max(box1[0], box2[0]);
+            const y1 = Math.max(box1[1], box2[1]);
+            const x2 = Math.min(box1[0] + box1[2], box2[0] + box2[2]);
+            const y2 = Math.min(box1[1] + box1[3], box2[1] + box2[3]);
+            
+            if (x2 < x1 || y2 < y1) return 0;
+            
+            const intersection = (x2-x1) * (y2-y1);
+            const union = box1[2]*box1[3] + box2[2]*box2[3] - intersection;
+            return intersection / union;
+        }
+
+        function updateUI(id, value, cls = '') {
+            const el = document.getElementById(id);
+            if (el) {
+                el.textContent = value;
+                el.className = 'value ' + cls;
+            }
+        }
+
+        function log(msg, type = 'info') {
+            const logEl = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.style.color = type === 'success' ? '#0f0' : type === 'error' ? '#f00' : type === 'warn' ? '#ff0' : '#0ff';
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logEl.insertBefore(entry, logEl.firstChild);
+            
+            while (logEl.children.length > 30) {
+                logEl.removeChild(logEl.lastChild);
+            }
+        }
+
+        // ============ CLEANUP ============
+        window.addEventListener('beforeunload', () => {
+            if (systemRunning) {
+                sendCommand(0, 0);
+                if (video.srcObject) {
+                    video.srcObject.getTracks().forEach(t => t.stop());
+                }
+            }
+        });
+
+        // Auto-start on load
+        log('💡 Enter ESP32 IP and click START', 'info');
+    </script>
+</body>
+</html>
