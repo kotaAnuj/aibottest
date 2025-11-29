@@ -3,811 +3,439 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Person Follower Pro</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3"></script>
+    <title>Person Movement Tracker</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/posenet"></script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: monospace; background: #000; color: #0f0; overflow: hidden; }
-        #container { position: relative; width: 100vw; height: 100vh; }
-        #videoElement { position: absolute; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); z-index: 1; }
-        #canvas { position: absolute; width: 100%; height: 100%; transform: scaleX(-1); z-index: 2; pointer-events: none; }
-        .panel { position: absolute; background: rgba(0,0,0,0.9); padding: 10px; border: 2px solid #0f0; border-radius: 5px; z-index: 100; }
-        #controls { top: 10px; left: 10px; width: 250px; }
-        #status { top: 10px; right: 10px; width: 280px; font-size: 12px; }
-        #log { bottom: 10px; left: 10px; width: 400px; max-height: 120px; overflow-y: auto; font-size: 11px; }
-        input { background: #000; color: #0f0; border: 1px solid #0f0; padding: 5px; width: 100%; margin: 5px 0; }
-        button { background: #000; color: #0f0; border: 2px solid #0f0; padding: 8px; margin: 3px; cursor: pointer; font-weight: bold; }
-        button:hover { background: #0f0; color: #000; }
-        button.active { background: #0f0; color: #000; }
-        .row { display: flex; justify-content: space-between; margin: 3px 0; }
-        .label { color: #888; }
-        .value { color: #0f0; font-weight: bold; }
-        .warn { color: #ff0; }
-        .error { color: #f00; }
-        #joystick { position: absolute; bottom: 20px; right: 20px; width: 150px; height: 150px; background: rgba(0,0,0,0.8); border: 3px solid #0f0; border-radius: 50%; display: none; }
-        #joystick.active { display: block; }
-        #stick { position: absolute; width: 50px; height: 50px; background: #0f0; border: 2px solid #0ff; border-radius: 50%; top: 50%; left: 50%; transform: translate(-50%, -50%); cursor: pointer; }
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .video-container {
+            position: relative;
+            background: black;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        #video {
+            width: 100%;
+            height: 400px;
+            object-fit: cover;
+        }
+        
+        .canvas-container {
+            position: relative;
+            background: black;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        #output {
+            width: 100%;
+            height: 400px;
+        }
+        
+        .status-panel {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .status-item {
+            margin: 15px 0;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+        }
+        
+        .direction {
+            font-size: 24px;
+            font-weight: bold;
+            text-align: center;
+            padding: 20px;
+            margin: 10px 0;
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.3);
+        }
+        
+        .moving-left { color: #ff6b6b; }
+        .moving-right { color: #4ecdc4; }
+        .moving-close { color: #ffd93d; }
+        .moving-far { color: #6bcf7f; }
+        
+        button {
+            background: #4ecdc4;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 16px;
+            border-radius: 25px;
+            cursor: pointer;
+            margin: 10px 0;
+            transition: all 0.3s ease;
+        }
+        
+        button:hover {
+            background: #45b7af;
+            transform: translateY(-2px);
+        }
+        
+        .instructions {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
     </style>
 </head>
 <body>
-    <div id="container">
-        <video id="videoElement" autoplay playsinline muted></video>
-        <canvas id="canvas"></canvas>
-        
-        <div id="controls" class="panel">
-            <input type="text" id="espIP" placeholder="ESP32 IP: 192.168.1.100">
-            <div style="display: flex; flex-wrap: wrap;">
-                <button id="startBtn" onclick="startSystem()">START</button>
-                <button id="followBtn" onclick="toggleFollow()">FOLLOW</button>
-                <button id="remoteBtn" onclick="toggleRemote()">REMOTE</button>
-                <button onclick="emergencyStop()" style="border-color:#f00;color:#f00;">STOP</button>
-            </div>
+    <h1>👤 Person Movement Tracker</h1>
+    
+    <div style="text-align: center;">
+        <button id="startBtn">🚀 Start Tracking</button>
+        <button id="stopBtn">⏹️ Stop Tracking</button>
+    </div>
+    
+    <div class="container">
+        <div class="video-container">
+            <video id="video" playsinline autoplay muted></video>
         </div>
         
-        <div id="status" class="panel">
-            <div class="row"><span class="label">Mode:</span><span class="value" id="mode">IDLE</span></div>
-            <div class="row"><span class="label">ESP32:</span><span class="value" id="conn">OFF</span></div>
-            <div class="row"><span class="label">Target:</span><span class="value" id="target">NONE</span></div>
-            <div class="row"><span class="label">Position:</span><span class="value" id="pos">-</span></div>
-            <div class="row"><span class="label">Distance:</span><span class="value" id="dist">-</span></div>
-            <div class="row"><span class="label">Drive:</span><span class="value" id="drive">0</span></div>
-            <div class="row"><span class="label">Steer:</span><span class="value" id="steer">0</span></div>
-            <div class="row"><span class="label">FPS:</span><span class="value" id="fps">0</span></div>
+        <div class="canvas-container">
+            <canvas id="output"></canvas>
+        </div>
+    </div>
+    
+    <div class="status-panel">
+        <h2>📊 Tracking Status</h2>
+        
+        <div class="direction" id="directionDisplay">
+            Waiting for movement...
         </div>
         
-        <div id="joystick">
-            <div id="stick"></div>
+        <div class="status-item">
+            <strong>Horizontal Movement:</strong> 
+            <span id="horizontalStatus">-</span>
         </div>
         
-        <div id="log" class="panel"></div>
+        <div class="status-item">
+            <strong>Distance:</strong> 
+            <span id="distanceStatus">-</span>
+        </div>
+        
+        <div class="status-item">
+            <strong>Confidence:</strong> 
+            <span id="confidenceStatus">-</span>
+        </div>
+        
+        <div class="status-item">
+            <strong>Position X:</strong> 
+            <span id="positionX">-</span>
+        </div>
+        
+        <div class="status-item">
+            <strong>Position Y:</strong> 
+            <span id="positionY">-</span>
+        </div>
+    </div>
+    
+    <div class="instructions">
+        <h3>🎯 How to use:</h3>
+        <p>• Click "Start Tracking" and allow camera access</p>
+        <p>• Stand in front of your webcam</p>
+        <p>• Move left/right to see direction detection</p>
+        <p>• Move closer/farther to see distance tracking</p>
+        <p>• Make sure you're in a well-lit area</p>
     </div>
 
     <script>
-        // ============ CONFIGURATION ============
-        const CONFIG = {
-            OPTIMAL_DISTANCE: 150,      // pixels - target distance
-            CENTER_DEADZONE: 0.08,      // 8% center deadzone
-            DISTANCE_DEADZONE: 30,      // pixels deadzone
-            
-            MAX_DRIVE: 100,
-            MAX_STEER: 100,
-            MIN_SPEED: 25,
-            
-            // PID Tuning
-            STEER_KP: 180,             // Steering proportional
-            STEER_KD: 40,              // Steering derivative
-            DRIVE_KP: 0.6,             // Drive proportional
-            DRIVE_KD: 0.2,             // Drive derivative
-            
-            COMMAND_RATE: 100,          // ms between commands
-            MIN_CONFIDENCE: 0.5,
-            LOST_TIMEOUT: 20,
-        };
+        // Global variables
+        let video;
+        let output;
+        let ctx;
+        let net;
+        let isTracking = false;
+        let animationId;
+        
+        // Tracking history
+        let positionHistory = [];
+        const maxHistory = 10;
+        
+        // Thresholds
+        const MOVEMENT_THRESHOLD = 30;
+        const DISTANCE_THRESHOLD = 50;
+        
+        // DOM elements
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const directionDisplay = document.getElementById('directionDisplay');
+        const horizontalStatus = document.getElementById('horizontalStatus');
+        const distanceStatus = document.getElementById('distanceStatus');
+        const confidenceStatus = document.getElementById('confidenceStatus');
+        const positionX = document.getElementById('positionX');
+        const positionY = document.getElementById('positionY');
 
-        // ============ GLOBAL STATE ============
-        const video = document.getElementById('videoElement');
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
-        
-        let model = null;
-        let systemRunning = false;
-        let followMode = false;
-        let remoteMode = false;
-        let espIP = '';
-        
-        let trackedPerson = null;
-        let lostFrames = 0;
-        
-        // PID state
-        let lastError = 0;
-        let lastDistError = 0;
-        let lastTime = Date.now();
-        
-        // Performance
-        let frameCount = 0;
-        let fpsTime = Date.now();
-        let lastCmdTime = 0;
-        
-        // Joystick
-        let joyActive = false;
-        let joyX = 0;
-        let joyY = 0;
-
-        // ============ INITIALIZATION ============
-        async function startSystem() {
-            if (systemRunning) {
-                stopSystem();
-                return;
+        // Initialize the application
+        async function init() {
+            video = document.getElementById('video');
+            output = document.getElementById('output');
+            ctx = output.getContext('2d');
+            
+            // Set canvas size
+            output.width = 640;
+            output.height = 480;
+            
+            // Load PoseNet model
+            try {
+                net = await posenet.load({
+                    architecture: 'MobileNetV1',
+                    outputStride: 16,
+                    inputResolution: 257,
+                    multiplier: 0.75
+                });
+                console.log('PoseNet model loaded successfully');
+            } catch (error) {
+                console.error('Error loading PoseNet:', error);
+                alert('Error loading PoseNet model. Please check console for details.');
             }
             
-            log('🚀 Starting system...', 'info');
-            espIP = document.getElementById('espIP').value.trim();
+            // Event listeners
+            startBtn.addEventListener('click', startTracking);
+            stopBtn.addEventListener('click', stopTracking);
+        }
+
+        // Start tracking
+        async function startTracking() {
+            if (isTracking) return;
             
             try {
-                // Get camera
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'environment', width: 1280, height: 720 }
+                    video: { width: 640, height: 480 }
                 });
+                
                 video.srcObject = stream;
+                isTracking = true;
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
                 
-                await new Promise(resolve => {
-                    video.onloadedmetadata = () => {
-                        canvas.width = video.videoWidth;
-                        canvas.height = video.videoHeight;
-                        log(`📷 Camera: ${canvas.width}x${canvas.height}`, 'success');
-                        resolve();
-                    };
-                });
+                // Wait for video to load
+                video.onloadedmetadata = () => {
+                    detectPose();
+                };
                 
-                // Load AI model
-                log('🧠 Loading AI model...', 'info');
-                model = await cocoSsd.load();
-                log('✅ Model loaded', 'success');
-                
-                systemRunning = true;
-                document.getElementById('startBtn').classList.add('active');
-                updateUI('mode', 'READY', '');
-                
-                detectLoop();
-                
-            } catch (e) {
-                log('❌ Error: ' + e.message, 'error');
-                updateUI('mode', 'ERROR', 'error');
+            } catch (error) {
+                console.error('Error accessing camera:', error);
+                alert('Cannot access camera. Please make sure you have a webcam connected and have granted permission.');
             }
         }
 
-        function stopSystem() {
-            systemRunning = false;
-            followMode = false;
-            remoteMode = false;
+        // Stop tracking
+        function stopTracking() {
+            isTracking = false;
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
             
             if (video.srcObject) {
-                video.srcObject.getTracks().forEach(t => t.stop());
+                video.srcObject.getTracks().forEach(track => track.stop());
             }
             
-            sendCommand(0, 0);
+            // Clear canvas
+            ctx.clearRect(0, 0, output.width, output.height);
             
-            document.getElementById('startBtn').classList.remove('active');
-            document.getElementById('followBtn').classList.remove('active');
-            document.getElementById('remoteBtn').classList.remove('active');
-            document.getElementById('joystick').classList.remove('active');
-            
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            updateUI('mode', 'STOPPED', 'warn');
-            log('⏹️ System stopped', 'warn');
-            
-            resetPID();
+            // Reset displays
+            directionDisplay.textContent = 'Tracking stopped';
+            directionDisplay.className = 'direction';
+            horizontalStatus.textContent = '-';
+            distanceStatus.textContent = '-';
+            confidenceStatus.textContent = '-';
+            positionX.textContent = '-';
+            positionY.textContent = '-';
         }
 
-        function toggleFollow() {
-            if (!systemRunning) {
-                log('⚠️ Start system first!', 'warn');
-                return;
-            }
-            
-            followMode = !followMode;
-            remoteMode = false;
-            
-            document.getElementById('followBtn').classList.toggle('active', followMode);
-            document.getElementById('remoteBtn').classList.remove('active');
-            document.getElementById('joystick').classList.remove('active');
-            
-            if (followMode) {
-                updateUI('mode', 'FOLLOW', '');
-                log('✅ FOLLOW mode active', 'success');
-                resetPID();
-            } else {
-                updateUI('mode', 'READY', '');
-                sendCommand(0, 0);
-                log('⏸️ Follow stopped', 'warn');
-            }
-        }
-
-        function toggleRemote() {
-            if (!systemRunning) {
-                log('⚠️ Start system first!', 'warn');
-                return;
-            }
-            
-            remoteMode = !remoteMode;
-            followMode = false;
-            
-            document.getElementById('remoteBtn').classList.toggle('active', remoteMode);
-            document.getElementById('followBtn').classList.remove('active');
-            document.getElementById('joystick').classList.toggle('active', remoteMode);
-            
-            if (remoteMode) {
-                updateUI('mode', 'REMOTE', '');
-                log('✅ REMOTE control active', 'success');
-                remoteLoop();
-            } else {
-                updateUI('mode', 'READY', '');
-                sendCommand(0, 0);
-                log('⏸️ Remote stopped', 'warn');
-            }
-        }
-
-        function emergencyStop() {
-            followMode = false;
-            remoteMode = false;
-            sendCommand(0, 0);
-            updateUI('mode', 'E-STOP', 'error');
-            log('🛑 EMERGENCY STOP', 'error');
-            
-            document.getElementById('followBtn').classList.remove('active');
-            document.getElementById('remoteBtn').classList.remove('active');
-            document.getElementById('joystick').classList.remove('active');
-        }
-
-        // ============ ADVANCED OBJECT TRACKER ============
-        class ObjectTracker {
-            constructor() {
-                this.trackedObject = null;
-                this.trackID = null;
-                this.history = [];
-                this.maxHistory = 5;
-                this.lostFrames = 0;
-                this.velocity = { x: 0, y: 0 };
-                this.lastPosition = null;
-                this.lastTime = Date.now();
-                this.confidence = 0;
-            }
-            
-            update(detections) {
-                if (!detections || detections.length === 0) {
-                    this.lostFrames++;
-                    
-                    // Use prediction if recently lost
-                    if (this.lostFrames < CONFIG.LOST_TIMEOUT && this.lastPosition) {
-                        return this.predictPosition();
-                    }
-                    
-                    if (this.lostFrames > CONFIG.LOST_TIMEOUT) {
-                        this.reset();
-                    }
-                    return null;
-                }
-                
-                // Initial lock - select largest person
-                if (!this.trackedObject) {
-                    this.trackedObject = detections.reduce((max, p) => 
-                        (p.bbox[2] * p.bbox[3] > max.bbox[2] * max.bbox[3]) ? p : max
-                    );
-                    this.confidence = this.trackedObject.score;
-                    this.trackID = Date.now();
-                    log('🎯 Target LOCKED', 'success');
-                    return this.processDetection(this.trackedObject);
-                }
-                
-                // Multi-criteria tracking
-                let bestMatch = null;
-                let bestScore = 0;
-                
-                for (const detection of detections) {
-                    // 1. IOU matching (position similarity)
-                    const iou = this.calcIOU(this.trackedObject.bbox, detection.bbox);
-                    
-                    // 2. Size similarity
-                    const sizeRatio = Math.min(
-                        this.getArea(detection.bbox) / this.getArea(this.trackedObject.bbox),
-                        this.getArea(this.trackedObject.bbox) / this.getArea(detection.bbox)
-                    );
-                    
-                    // 3. Predicted position matching
-                    const predicted = this.predictPosition();
-                    let predictionScore = 0;
-                    if (predicted) {
-                        const [dx, dy, dw, dh] = detection.bbox;
-                        const detCenter = { x: dx + dw/2, y: dy + dh/2 };
-                        const dist = Math.sqrt(
-                            Math.pow(detCenter.x - predicted.centerX, 2) + 
-                            Math.pow(detCenter.y - predicted.centerY, 2)
-                        );
-                        predictionScore = Math.max(0, 1 - dist / 200);
-                    }
-                    
-                    // Weighted scoring
-                    const score = (
-                        iou * 0.5 +                    // 50% position
-                        sizeRatio * 0.3 +              // 30% size
-                        predictionScore * 0.2          // 20% prediction
-                    );
-                    
-                    if (score > bestScore && score > 0.3) {
-                        bestScore = score;
-                        bestMatch = detection;
-                    }
-                }
-                
-                if (bestMatch) {
-                    // Update tracking
-                    this.trackedObject = bestMatch;
-                    this.confidence = bestMatch.score * bestScore;
-                    this.lostFrames = 0;
-                    
-                    return this.processDetection(bestMatch);
-                } else {
-                    this.lostFrames++;
-                    return this.predictPosition();
-                }
-            }
-            
-            processDetection(detection) {
-                const [x, y, w, h] = detection.bbox;
-                const centerX = x + w/2;
-                const centerY = y + h/2;
-                
-                // Update velocity
-                const now = Date.now();
-                if (this.lastPosition) {
-                    const dt = (now - this.lastTime) / 1000;
-                    const vx = (centerX - this.lastPosition.x) / dt;
-                    const vy = (centerY - this.lastPosition.y) / dt;
-                    
-                    // Smooth velocity with exponential moving average
-                    this.velocity.x = 0.3 * vx + 0.7 * this.velocity.x;
-                    this.velocity.y = 0.3 * vy + 0.7 * this.velocity.y;
-                }
-                
-                // Update history
-                this.history.push({ x: centerX, y: centerY, time: now });
-                if (this.history.length > this.maxHistory) {
-                    this.history.shift();
-                }
-                
-                this.lastPosition = { x: centerX, y: centerY };
-                this.lastTime = now;
-                
-                return {
-                    bbox: detection.bbox,
-                    centerX,
-                    centerY,
-                    width: w,
-                    height: h,
-                    confidence: this.confidence,
-                    velocity: { ...this.velocity },
-                    isPredicted: false
-                };
-            }
-            
-            predictPosition() {
-                if (!this.lastPosition || this.lostFrames > CONFIG.LOST_TIMEOUT) {
-                    return null;
-                }
-                
-                // Constant velocity model with decay
-                const dt = this.lostFrames * 0.033; // Assume 30 FPS
-                const decay = Math.exp(-this.lostFrames * 0.1);
-                
-                const predictedX = this.lastPosition.x + this.velocity.x * dt * decay;
-                const predictedY = this.lastPosition.y + this.velocity.y * dt * decay;
-                
-                // Estimate bbox from last known
-                const lastBbox = this.trackedObject ? this.trackedObject.bbox : [0, 0, 100, 100];
-                const predictedBbox = [
-                    predictedX - lastBbox[2]/2,
-                    predictedY - lastBbox[3]/2,
-                    lastBbox[2],
-                    lastBbox[3]
-                ];
-                
-                const confidence = Math.max(0, (1 - this.lostFrames / CONFIG.LOST_TIMEOUT)) * 0.7;
-                
-                return {
-                    bbox: predictedBbox,
-                    centerX: predictedX,
-                    centerY: predictedY,
-                    width: lastBbox[2],
-                    height: lastBbox[3],
-                    confidence: confidence,
-                    velocity: { ...this.velocity },
-                    isPredicted: true
-                };
-            }
-            
-            calcIOU(box1, box2) {
-                const x1 = Math.max(box1[0], box2[0]);
-                const y1 = Math.max(box1[1], box2[1]);
-                const x2 = Math.min(box1[0] + box1[2], box2[0] + box2[2]);
-                const y2 = Math.min(box1[1] + box1[3], box2[1] + box2[3]);
-                
-                if (x2 < x1 || y2 < y1) return 0;
-                
-                const intersection = (x2-x1) * (y2-y1);
-                const union = box1[2]*box1[3] + box2[2]*box2[3] - intersection;
-                return intersection / union;
-            }
-            
-            getArea(bbox) {
-                return bbox[2] * bbox[3];
-            }
-            
-            isActive() {
-                return this.trackedObject !== null && this.lostFrames < CONFIG.LOST_TIMEOUT;
-            }
-            
-            reset() {
-                this.trackedObject = null;
-                this.trackID = null;
-                this.history = [];
-                this.lostFrames = 0;
-                this.velocity = { x: 0, y: 0 };
-                this.lastPosition = null;
-                this.confidence = 0;
-            }
-        }
-        
-        const objectTracker = new ObjectTracker();
-
-        // ============ DETECTION LOOP ============
-        async function detectLoop() {
-            if (!systemRunning || !model) {
-                setTimeout(detectLoop, 100);
-                return;
-            }
-            
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Main pose detection function
+        async function detectPose() {
+            if (!isTracking) return;
             
             try {
-                // Detect people
-                const predictions = await model.detect(video);
-                const people = predictions.filter(p => 
-                    p.class === 'person' && p.score >= CONFIG.MIN_CONFIDENCE
-                );
-                
-                // Update FPS
-                frameCount++;
-                if (Date.now() - fpsTime > 1000) {
-                    updateUI('fps', frameCount, '');
-                    frameCount = 0;
-                    fpsTime = Date.now();
-                }
-                
-                // Draw all detections (dimmed)
-                people.forEach((p, i) => {
-                    const [x, y, w, h] = p.bbox;
-                    ctx.strokeStyle = 'rgba(255,255,0,0.3)';
-                    ctx.lineWidth = 1;
-                    ctx.strokeRect(x, y, w, h);
-                    ctx.fillStyle = 'rgba(255,255,0,0.5)';
-                    ctx.font = '10px monospace';
-                    ctx.fillText(`${Math.round(p.score*100)}%`, x+5, y+15);
+                // Get pose estimation
+                const pose = await net.estimateSinglePose(video, {
+                    flipHorizontal: false
                 });
                 
-                // Update object tracker
-                const targetInfo = objectTracker.update(people);
+                // Draw video frame to canvas
+                ctx.drawImage(video, 0, 0, output.width, output.height);
                 
-                if (targetInfo) {
-                    // Process target for control
-                    const screenCenterX = canvas.width / 2;
-                    const screenCenterY = canvas.height / 2;
+                if (pose.score > 0.3) {
+                    // Draw skeleton
+                    drawSkeleton(pose);
                     
-                    const posError = (targetInfo.centerX - screenCenterX) / screenCenterX;
-                    const distance = Math.sqrt(
-                        Math.pow(targetInfo.centerX - screenCenterX, 2) + 
-                        Math.pow(targetInfo.centerY - screenCenterY, 2)
-                    );
+                    // Get nose position (keypoint 0)
+                    const nose = pose.keypoints[0];
                     
-                    const enrichedInfo = {
-                        ...targetInfo,
-                        posError,
-                        distance
-                    };
-                    
-                    // Draw tracking visualization
-                    if (targetInfo.isPredicted) {
-                        drawPredictedTarget(enrichedInfo);
-                        updateUI('target', 'PREDICTING', 'warn');
-                    } else {
-                        drawTrackedTarget(enrichedInfo);
-                        updateUI('target', 'LOCKED', '');
+                    if (nose.score > 0.5) {
+                        // Update tracking history
+                        updatePositionHistory(nose.position.x, nose.position.y, pose.score);
+                        
+                        // Analyze movement
+                        analyzeMovement();
+                        
+                        // Update displays
+                        updateDisplays(nose.position.x, nose.position.y, pose.score);
                     }
-                    
-                    updateUI('pos', `${Math.round(targetInfo.centerX)}, ${Math.round(targetInfo.centerY)}`, '');
-                    updateUI('dist', `${Math.round(distance)}px`, '');
-                    
-                    // Follow mode control
-                    if (followMode) {
-                        const cmd = calculateCommand(enrichedInfo);
-                        sendCommand(cmd.drive, cmd.steer);
-                    }
-                } else {
-                    updateUI('target', 'LOST', 'error');
-                    updateUI('pos', '-', '');
-                    updateUI('dist', '-', '');
-                    if (followMode) sendCommand(0, 0);
-                    
-                    // Draw "target lost" message
-                    ctx.fillStyle = 'rgba(255,0,0,0.7)';
-                    ctx.font = 'bold 24px monospace';
-                    ctx.textAlign = 'center';
-                    ctx.fillText('TARGET LOST', canvas.width/2, canvas.height/2);
-                    ctx.textAlign = 'left';
                 }
                 
-                // Draw center crosshair
-                ctx.strokeStyle = 'rgba(0,255,255,0.3)';
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.moveTo(canvas.width/2, 0);
-                ctx.lineTo(canvas.width/2, canvas.height);
-                ctx.moveTo(0, canvas.height/2);
-                ctx.lineTo(canvas.width, canvas.height/2);
-                ctx.stroke();
+                // Continue detection
+                animationId = requestAnimationFrame(detectPose);
                 
-            } catch (err) {
-                console.error('Detection error:', err);
+            } catch (error) {
+                console.error('Error in pose detection:', error);
+                animationId = requestAnimationFrame(detectPose);
             }
-            
-            setTimeout(detectLoop, 33); // ~30 FPS
         }
 
-        // ============ TARGET PROCESSING ============
-        function processTarget(person) {
-            const [x, y, w, h] = person.bbox;
-            const centerX = x + w/2;
-            const centerY = y + h/2;
+        // Draw skeleton on canvas
+        function drawSkeleton(pose) {
+            const keypoints = pose.keypoints;
             
-            const screenCenterX = canvas.width / 2;
-            const screenCenterY = canvas.height / 2;
+            // Draw keypoints
+            keypoints.forEach(keypoint => {
+                if (keypoint.score > 0.3) {
+                    ctx.beginPath();
+                    ctx.arc(keypoint.position.x, keypoint.position.y, 4, 0, 2 * Math.PI);
+                    ctx.fillStyle = 'red';
+                    ctx.fill();
+                }
+            });
             
-            const posError = (centerX - screenCenterX) / screenCenterX;
-            const distance = Math.sqrt(
-                Math.pow(centerX - screenCenterX, 2) + 
-                Math.pow(centerY - screenCenterY, 2)
-            );
+            // Define skeleton connections
+            const connections = [
+                [5, 6], [5, 7], [7, 9], [6, 8], [8, 10], [5, 11], [6, 12],
+                [11, 12], [11, 13], [13, 15], [12, 14], [14, 16]
+            ];
             
-            updateUI('target', 'LOCKED', '');
-            updateUI('pos', `${Math.round(centerX)}, ${Math.round(centerY)}`, '');
-            updateUI('dist', `${Math.round(distance)}px`, '');
-            
-            return {
-                bbox: person.bbox,
-                centerX,
-                centerY,
-                posError,
-                distance,
-                confidence: person.score
-            };
-        }
-
-        function drawTarget(info) {
-            const [x, y, w, h] = info.bbox;
-            
-            // Green box
-            ctx.strokeStyle = '#0f0';
-            ctx.lineWidth = 3;
-            ctx.strokeRect(x, y, w, h);
-            
-            // Crosshair
-            ctx.strokeStyle = '#f00';
+            // Draw connections
+            ctx.strokeStyle = 'green';
             ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(info.centerX - 20, info.centerY);
-            ctx.lineTo(info.centerX + 20, info.centerY);
-            ctx.moveTo(info.centerX, info.centerY - 20);
-            ctx.lineTo(info.centerX, info.centerY + 20);
-            ctx.stroke();
             
-            // Info text
-            ctx.fillStyle = '#0f0';
-            ctx.font = 'bold 14px monospace';
-            ctx.fillText(`TRACKING ${Math.round(info.confidence*100)}%`, x, y-8);
-        }
-
-        // ============ PID CONTROL ============
-        function calculateCommand(info) {
-            const now = Date.now();
-            const dt = Math.max((now - lastTime) / 1000, 0.01);
-            
-            // STEERING CONTROL (left/right)
-            let steer = 0;
-            const absError = Math.abs(info.posError);
-            
-            if (absError > CONFIG.CENTER_DEADZONE) {
-                // PID for steering
-                const P = CONFIG.STEER_KP * info.posError;
-                const D = CONFIG.STEER_KD * (info.posError - lastError) / dt;
+            connections.forEach(connection => {
+                const [start, end] = connection;
+                const startPoint = keypoints[start];
+                const endPoint = keypoints[end];
                 
-                steer = P + D;
-                steer = Math.max(-CONFIG.MAX_STEER, Math.min(CONFIG.MAX_STEER, steer));
-                
-                // Round to integer
-                steer = Math.round(steer);
-            }
-            
-            // DRIVE CONTROL (forward/backward)
-            let drive = 0;
-            const distError = info.distance - CONFIG.OPTIMAL_DISTANCE;
-            const absDistError = Math.abs(distError);
-            
-            if (absDistError > CONFIG.DISTANCE_DEADZONE) {
-                // PID for drive
-                const P = CONFIG.DRIVE_KP * distError;
-                const D = CONFIG.DRIVE_KD * (distError - lastDistError) / dt;
-                
-                drive = P + D;
-                drive = Math.max(-CONFIG.MAX_DRIVE, Math.min(CONFIG.MAX_DRIVE, drive));
-                
-                // Apply minimum speed threshold
-                if (Math.abs(drive) > 0 && Math.abs(drive) < CONFIG.MIN_SPEED) {
-                    drive = drive > 0 ? CONFIG.MIN_SPEED : -CONFIG.MIN_SPEED;
+                if (startPoint.score > 0.3 && endPoint.score > 0.3) {
+                    ctx.beginPath();
+                    ctx.moveTo(startPoint.position.x, startPoint.position.y);
+                    ctx.lineTo(endPoint.position.x, endPoint.position.y);
+                    ctx.stroke();
                 }
-                
-                drive = Math.round(drive);
-            }
-            
-            // Update PID state
-            lastError = info.posError;
-            lastDistError = distError;
-            lastTime = now;
-            
-            return { drive, steer };
+            });
         }
 
-        function resetPID() {
-            lastError = 0;
-            lastDistError = 0;
-            lastTime = Date.now();
-        }
-
-        // ============ REMOTE CONTROL ============
-        function remoteLoop() {
-            if (!remoteMode) return;
+        // Update position history for movement analysis
+        function updatePositionHistory(x, y, confidence) {
+            positionHistory.unshift({
+                x: x,
+                y: y,
+                confidence: confidence,
+                timestamp: Date.now()
+            });
             
-            const drive = Math.round(-joyY * 100); // Invert Y
-            const steer = Math.round(joyX * 100);
-            
-            sendCommand(drive, steer);
-            
-            setTimeout(remoteLoop, CONFIG.COMMAND_RATE);
-        }
-
-        // ============ JOYSTICK ============
-        const stick = document.getElementById('stick');
-        const joystick = document.getElementById('joystick');
-        let centerX = 0, centerY = 0;
-        const maxDist = 50;
-
-        stick.addEventListener('mousedown', startJoy);
-        stick.addEventListener('touchstart', startJoy);
-        
-        document.addEventListener('mousemove', moveJoy);
-        document.addEventListener('touchmove', moveJoy);
-        
-        document.addEventListener('mouseup', endJoy);
-        document.addEventListener('touchend', endJoy);
-
-        function startJoy(e) {
-            e.preventDefault();
-            joyActive = true;
-            const rect = joystick.getBoundingClientRect();
-            centerX = rect.left + rect.width/2;
-            centerY = rect.top + rect.height/2;
-        }
-
-        function moveJoy(e) {
-            if (!joyActive) return;
-            e.preventDefault();
-            
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-            
-            let dx = clientX - centerX;
-            let dy = clientY - centerY;
-            
-            const dist = Math.sqrt(dx*dx + dy*dy);
-            if (dist > maxDist) {
-                dx = (dx/dist) * maxDist;
-                dy = (dy/dist) * maxDist;
-            }
-            
-            joyX = dx / maxDist;
-            joyY = dy / maxDist;
-            
-            stick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-        }
-
-        function endJoy(e) {
-            if (!joyActive) return;
-            e.preventDefault();
-            joyActive = false;
-            joyX = 0;
-            joyY = 0;
-            stick.style.transform = 'translate(-50%, -50%)';
-        }
-
-        // ============ COMMUNICATION ============
-        let connStatus = false;
-
-        async function sendCommand(drive, steer) {
-            const now = Date.now();
-            if (now - lastCmdTime < CONFIG.COMMAND_RATE) return;
-            lastCmdTime = now;
-            
-            updateUI('drive', drive, drive !== 0 ? 'warn' : '');
-            updateUI('steer', steer, steer !== 0 ? 'warn' : '');
-            
-            if (!espIP) {
-                updateUI('conn', 'NO IP', 'error');
-                return;
-            }
-            
-            try {
-                const url = `http://${espIP}/control?drive=${drive}&steer=${steer}`;
-                const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 1000);
-                
-                const response = await fetch(url, {
-                    method: 'GET',
-                    signal: controller.signal
-                });
-                
-                clearTimeout(timeout);
-                
-                if (response.ok) {
-                    if (!connStatus) {
-                        connStatus = true;
-                        updateUI('conn', 'ONLINE', '');
-                        log('✅ ESP32 connected', 'success');
-                    }
-                }
-            } catch (err) {
-                if (connStatus) {
-                    connStatus = false;
-                    updateUI('conn', 'OFFLINE', 'error');
-                    log('❌ Connection lost', 'error');
-                }
+            // Keep only recent history
+            if (positionHistory.length > maxHistory) {
+                positionHistory.pop();
             }
         }
 
-        // ============ UTILITIES ============
-        function calcIOU(box1, box2) {
-            const x1 = Math.max(box1[0], box2[0]);
-            const y1 = Math.max(box1[1], box2[1]);
-            const x2 = Math.min(box1[0] + box1[2], box2[0] + box2[2]);
-            const y2 = Math.min(box1[1] + box1[3], box2[1] + box2[3]);
+        // Analyze movement patterns
+        function analyzeMovement() {
+            if (positionHistory.length < 3) return;
             
-            if (x2 < x1 || y2 < y1) return 0;
+            const current = positionHistory[0];
+            const previous = positionHistory[Math.min(2, positionHistory.length - 1)];
             
-            const intersection = (x2-x1) * (y2-y1);
-            const union = box1[2]*box1[3] + box2[2]*box2[3] - intersection;
-            return intersection / union;
+            // Calculate movement
+            const deltaX = current.x - previous.x;
+            const deltaY = current.y - previous.y;
+            
+            // Determine horizontal movement
+            let horizontalMovement = 'stable';
+            if (Math.abs(deltaX) > MOVEMENT_THRESHOLD) {
+                horizontalMovement = deltaX > 0 ? 'moving right' : 'moving left';
+            }
+            
+            // Determine distance change (using Y position as proxy for distance)
+            let distanceChange = 'stable';
+            if (Math.abs(deltaY) > DISTANCE_THRESHOLD) {
+                distanceChange = deltaY > 0 ? 'moving down' : 'moving up';
+            }
+            
+            // Convert vertical movement to distance terminology
+            let distanceStatusText = 'stable';
+            if (distanceChange === 'moving up') {
+                distanceStatusText = 'moving closer';
+            } else if (distanceChange === 'moving down') {
+                distanceStatusText = 'moving farther';
+            }
+            
+            // Update direction display with combined message
+            let displayText = '';
+            let directionClass = '';
+            
+            if (horizontalMovement !== 'stable' && distanceStatusText !== 'stable') {
+                displayText = `${horizontalMovement} and ${distanceStatusText}`;
+                directionClass = 'moving-combined';
+            } else if (horizontalMovement !== 'stable') {
+                displayText = horizontalMovement;
+                directionClass = horizontalMovement === 'moving left' ? 'moving-left' : 'moving-right';
+            } else if (distanceStatusText !== 'stable') {
+                displayText = distanceStatusText;
+                directionClass = distanceStatusText === 'moving closer' ? 'moving-close' : 'moving-far';
+            } else {
+                displayText = 'Stable position';
+                directionClass = '';
+            }
+            
+            directionDisplay.textContent = displayText;
+            directionDisplay.className = `direction ${directionClass}`;
+            
+            // Update status displays
+            horizontalStatus.textContent = horizontalMovement;
+            distanceStatus.textContent = distanceStatusText;
         }
 
-        function updateUI(id, value, cls = '') {
-            const el = document.getElementById(id);
-            if (el) {
-                el.textContent = value;
-                el.className = 'value ' + cls;
-            }
+        // Update all status displays
+        function updateDisplays(x, y, confidence) {
+            positionX.textContent = Math.round(x);
+            positionY.textContent = Math.round(y);
+            confidenceStatus.textContent = (confidence * 100).toFixed(1) + '%';
         }
 
-        function log(msg, type = 'info') {
-            const logEl = document.getElementById('log');
-            const entry = document.createElement('div');
-            entry.style.color = type === 'success' ? '#0f0' : type === 'error' ? '#f00' : type === 'warn' ? '#ff0' : '#0ff';
-            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-            logEl.insertBefore(entry, logEl.firstChild);
-            
-            while (logEl.children.length > 30) {
-                logEl.removeChild(logEl.lastChild);
-            }
-        }
-
-        // ============ CLEANUP ============
-        window.addEventListener('beforeunload', () => {
-            if (systemRunning) {
-                sendCommand(0, 0);
-                if (video.srcObject) {
-                    video.srcObject.getTracks().forEach(t => t.stop());
-                }
-            }
-        });
-
-        // Auto-start on load
-        log('💡 Enter ESP32 IP and click START', 'info');
+        // Initialize when page loads
+        window.addEventListener('load', init);
     </script>
 </body>
 </html>
