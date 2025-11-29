@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced Person Follower</title>
+    <title>Advanced Person Follower Pro</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: monospace;
+            font-family: 'Courier New', monospace;
             background: #000;
             color: #0f0;
             overflow: hidden;
@@ -26,9 +26,6 @@
             object-fit: cover;
             transform: scaleX(-1);
             z-index: 1;
-            background: #000;
-            display: block;
-            visibility: visible;
         }
         #canvas {
             position: absolute;
@@ -42,10 +39,12 @@
             position: absolute;
             top: 10px;
             left: 10px;
-            background: rgba(0,0,0,0.8);
-            padding: 10px;
+            background: rgba(0,0,0,0.9);
+            padding: 15px;
             border: 2px solid #0f0;
+            border-radius: 8px;
             z-index: 100;
+            max-width: 280px;
         }
         #controls input { 
             background: #000;
@@ -53,76 +52,175 @@
             border: 1px solid #0f0;
             padding: 5px;
             margin: 5px 0;
-            width: 200px;
+            width: 100%;
+            font-family: monospace;
         }
         #controls button {
             background: #000;
             color: #0f0;
             border: 2px solid #0f0;
-            padding: 8px 15px;
+            padding: 10px 15px;
             cursor: pointer;
-            margin: 5px;
+            margin: 5px 2px;
             font-family: monospace;
             font-weight: bold;
+            border-radius: 4px;
+            transition: all 0.2s;
         }
-        #controls button:hover { background: #0f0; color: #000; }
-        #controls button.active { background: #f00; color: #fff; border-color: #f00; }
-        #controls button:disabled { 
-            opacity: 0.5; 
-            cursor: not-allowed; 
-            border-color: #444; 
-            color: #444; 
-        }
-        .loading {
-            display: inline-block;
-            width: 12px;
-            height: 12px;
-            border: 2px solid #0f0;
-            border-top-color: transparent;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
+        #controls button:hover { background: #0f0; color: #000; transform: scale(1.05); }
+        #controls button.active { background: #0f0; color: #000; }
+        #controls button.danger { border-color: #f00; color: #f00; }
+        #controls button.danger:hover { background: #f00; color: #fff; }
+        
         #status {
             position: absolute;
             top: 10px;
             right: 10px;
-            background: rgba(0,0,0,0.8);
-            padding: 10px;
+            background: rgba(0,0,0,0.9);
+            padding: 15px;
             border: 2px solid #0f0;
-            min-width: 300px;
+            border-radius: 8px;
+            min-width: 320px;
             z-index: 100;
         }
         .status-row { 
             display: flex;
             justify-content: space-between;
-            margin: 3px 0;
-            font-size: 14px;
+            margin: 4px 0;
+            font-size: 13px;
         }
         .status-label { color: #888; }
         .status-value { color: #0f0; font-weight: bold; }
         .status-value.warn { color: #ff0; }
         .status-value.error { color: #f00; }
+        
+        #joystick-container {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 180px;
+            height: 180px;
+            background: rgba(0,0,0,0.8);
+            border: 3px solid #0f0;
+            border-radius: 50%;
+            z-index: 99;
+            display: none;
+        }
+        #joystick-container.active { display: block; }
+        #joystick-base {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+        }
+        #joystick-stick {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            background: #0f0;
+            border: 3px solid #0ff;
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            cursor: pointer;
+            box-shadow: 0 0 20px #0f0;
+        }
+        
+        #obstacle-display {
+            position: absolute;
+            bottom: 20px;
+            left: 10px;
+            background: rgba(0,0,0,0.9);
+            padding: 15px;
+            border: 2px solid #0f0;
+            border-radius: 8px;
+            z-index: 100;
+        }
+        .obstacle-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .obstacle-sensor {
+            width: 50px;
+            height: 50px;
+            background: #002200;
+            border: 2px solid #0f0;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            transition: all 0.3s;
+        }
+        .obstacle-sensor.blocked {
+            background: #ff0000;
+            border-color: #ff0000;
+            box-shadow: 0 0 15px #ff0000;
+        }
+        .obstacle-sensor.warning {
+            background: #ffaa00;
+            border-color: #ffaa00;
+        }
+        
         #telemetry {
             position: absolute;
-            bottom: 10px;
+            bottom: 220px;
             left: 10px;
-            background: rgba(0,0,0,0.8);
+            background: rgba(0,0,0,0.9);
             padding: 10px;
             border: 2px solid #0f0;
+            border-radius: 8px;
             max-height: 150px;
             overflow-y: auto;
-            width: 400px;
+            width: 420px;
             z-index: 100;
-            font-size: 12px;
+            font-size: 11px;
         }
         .log { margin: 2px 0; }
         .log.info { color: #0ff; }
         .log.warn { color: #ff0; }
         .log.error { color: #f00; }
         .log.success { color: #0f0; }
+        
+        .mode-indicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.8);
+            padding: 20px 40px;
+            border: 3px solid #0f0;
+            border-radius: 10px;
+            font-size: 24px;
+            font-weight: bold;
+            z-index: 98;
+            display: none;
+            animation: pulse 2s infinite;
+        }
+        .mode-indicator.active { display: block; }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 0.8; transform: translate(-50%, -50%) scale(1); }
+            50% { opacity: 1; transform: translate(-50%, -50%) scale(1.05); }
+        }
+        
+        #prediction-trail {
+            position: absolute;
+            top: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.9);
+            padding: 10px 20px;
+            border: 2px solid #ff0;
+            border-radius: 8px;
+            z-index: 100;
+            display: none;
+            font-size: 12px;
+        }
+        #prediction-trail.active { display: block; }
     </style>
 </head>
 <body>
@@ -132,63 +230,98 @@
         
         <div id="controls">
             <div><input type="text" id="espIP" placeholder="ESP32 IP (192.168.x.x)"></div>
-            <div>
+            <div style="display: flex; flex-wrap: wrap;">
                 <button id="startBtn" onclick="startSystem()">START</button>
-                <button id="followBtn" onclick="toggleFollow()" style="border-color: #888; color: #888">FOLLOW OFF</button>
-                <button onclick="emergencyStop()" style="border-color: #f00; color: #f00">STOP</button>
+                <button id="followBtn" onclick="toggleFollow()">FOLLOW</button>
+                <button id="remoteBtn" onclick="toggleRemote()">REMOTE</button>
+                <button class="danger" onclick="emergencyStop()">E-STOP</button>
             </div>
-            <div style="margin-top: 10px; font-size: 11px;">
-                <div>PID Tuning:</div>
-                <div>Steer Kp: <input type="number" id="steerKp" value="2.5" step="0.1" min="0" max="100" style="width: 80px"></div>
-                <div>Steer Kd: <input type="number" id="steerKd" value="1.2" step="0.1" min="0" max="100" style="width: 80px"></div>
-                <div>Speed Kp: <input type="number" id="speedKp" value="200" step="10" min="0" max="1000" style="width: 80px"></div>
+            <div style="margin-top: 10px; font-size: 10px; border-top: 1px solid #0f0; padding-top: 10px;">
+                <div style="color: #888;">Advanced Controls:</div>
+                <div style="display: flex; justify-content: space-between; margin-top: 5px;">
+                    <label><input type="checkbox" id="predictionMode" checked> Prediction</label>
+                    <label><input type="checkbox" id="obstacleMode" checked> Obstacles</label>
+                </div>
             </div>
         </div>
         
         <div id="status">
-            <div class="status-row"><span class="status-label">State:</span><span class="status-value" id="stateDisplay">INIT</span></div>
+            <div class="status-row"><span class="status-label">Mode:</span><span class="status-value" id="modeDisplay">STANDBY</span></div>
             <div class="status-row"><span class="status-label">ESP32:</span><span class="status-value" id="connectionStatus">DISCONNECTED</span></div>
-            <div class="status-row"><span class="status-label">Target X:</span><span class="status-value" id="targetX">-</span></div>
-            <div class="status-row"><span class="status-label">Target Size:</span><span class="status-value" id="targetSize">-</span></div>
-            <div class="status-row"><span class="status-label">Error X:</span><span class="status-value" id="errorX">-</span></div>
-            <div class="status-row"><span class="status-label">Error Size:</span><span class="status-value" id="errorSize">-</span></div>
-            <div class="status-row"><span class="status-label">Steer:</span><span class="status-value" id="steerOut">0</span></div>
+            <div class="status-row"><span class="status-label">Target:</span><span class="status-value" id="targetStatus">NO TARGET</span></div>
+            <div class="status-row"><span class="status-label">Position:</span><span class="status-value" id="positionDisplay">-</span></div>
+            <div class="status-row"><span class="status-label">Velocity:</span><span class="status-value" id="velocityDisplay">-</span></div>
+            <div class="status-row"><span class="status-label">Distance:</span><span class="status-value" id="distanceDisplay">-</span></div>
+            <div class="status-row"><span class="status-label">Prediction:</span><span class="status-value" id="predictionDisplay">-</span></div>
             <div class="status-row"><span class="status-label">Drive:</span><span class="status-value" id="driveOut">0</span></div>
+            <div class="status-row"><span class="status-label">Steer:</span><span class="status-value" id="steerOut">0</span></div>
             <div class="status-row"><span class="status-label">FPS:</span><span class="status-value" id="fps">0</span></div>
-            <div class="status-row"><span class="status-label">Confidence:</span><span class="status-value" id="confidence">-</span></div>
+        </div>
+        
+        <div id="joystick-container">
+            <div id="joystick-base"></div>
+            <div id="joystick-stick"></div>
+        </div>
+        
+        <div id="obstacle-display">
+            <div style="text-align: center; margin-bottom: 5px;">PROXIMITY</div>
+            <div class="obstacle-grid">
+                <div class="obstacle-sensor" id="sensor-fl">FL<br>-</div>
+                <div class="obstacle-sensor" id="sensor-fc">FC<br>-</div>
+                <div class="obstacle-sensor" id="sensor-fr">FR<br>-</div>
+                <div class="obstacle-sensor" id="sensor-l">L<br>-</div>
+                <div class="obstacle-sensor" id="sensor-c">C<br>-</div>
+                <div class="obstacle-sensor" id="sensor-r">R<br>-</div>
+            </div>
         </div>
         
         <div id="telemetry"></div>
+        <div id="mode-indicator" class="mode-indicator"></div>
+        <div id="prediction-trail"></div>
     </div>
 
     <script>
-        // ============ CONFIGURATION ============
+        // ============ ADVANCED CONFIGURATION ============
         const CONFIG = {
-            // Target distance (person size as % of screen)
-            TARGET_SIZE: 0.20,           // Ideal person size (20% of screen)
-            MIN_SIZE: 0.08,              // Too far
-            MAX_SIZE: 0.35,              // Too close
+            // Target parameters
+            TARGET_SIZE: 0.22,
+            MIN_SIZE: 0.10,
+            MAX_SIZE: 0.40,
+            OPTIMAL_DISTANCE: 130,
+            MIN_DISTANCE: 80,
+            MAX_DISTANCE: 250,
             
             // Dead zones
-            CENTER_DEADZONE: 0.08,       // ±8% from center = no steering
-            SIZE_DEADZONE: 0.03,         // ±3% from target size = no speed change
+            CENTER_DEADZONE: 0.06,
+            SIZE_DEADZONE: 0.04,
             
             // Speed limits
-            MAX_DRIVE: 60,               // Max forward speed
-            MAX_STEER: 100,              // Max steering angle
-            MIN_DRIVE: 25,               // Minimum speed to move
+            MAX_DRIVE: 80,
+            MAX_STEER: 100,
+            MIN_DRIVE: 20,
+            BACKUP_SPEED: -35,
             
             // Control rates
-            DETECTION_RATE: 100,         // 10 Hz detection
-            COMMAND_RATE: 100,           // 10 Hz commands to ESP32
+            DETECTION_RATE: 50,
+            COMMAND_RATE: 50,
             
-            // Tracking
-            LOST_TIMEOUT: 15,            // Frames before declaring person lost
-            MIN_CONFIDENCE: 0.5,         // Minimum detection confidence
+            // Tracking & Prediction
+            LOST_TIMEOUT: 30,
+            MIN_CONFIDENCE: 0.45,
+            PREDICTION_HORIZON: 15,
+            VELOCITY_ALPHA: 0.3,
             
-            // Smoothing
-            KALMAN_PROCESS_NOISE: 0.01,
-            KALMAN_MEASUREMENT_NOISE: 0.5,
+            // Obstacle avoidance
+            OBSTACLE_STOP_DISTANCE: 25,
+            OBSTACLE_SLOW_DISTANCE: 50,
+            OBSTACLE_CHECK_RATE: 100,
+            
+            // PID Gains - Cascade Control
+            POSITION_KP: 3.2,
+            POSITION_KD: 1.8,
+            VELOCITY_KP: 0.8,
+            SPEED_KP: 220,
+            SPEED_KD: 15,
         };
 
         // ============ GLOBAL STATE ============
@@ -198,119 +331,412 @@
         let model = null;
         let systemRunning = false;
         let followActive = false;
+        let remoteActive = false;
         let espIP = '';
         
-        // PID Controllers
-        let steerPID, speedPID;
+        // Control modes
+        let currentMode = 'STANDBY'; // STANDBY, FOLLOW, REMOTE, EMERGENCY
         
-        // Kalman Filters
-        let xFilter, sizeFilter;
-        
-        // Tracking state
-        let targetPerson = null;
-        let lostFrames = 0;
-        let lastCommandTime = 0;
-        let frameCount = 0;
-        let lastFPSTime = Date.now();
+        // Advanced tracking
+        let targetTracker = null;
+        let motionPredictor = null;
+        let obstacleManager = null;
+        let commandGenerator = null;
         
         // Performance
-        let detectionTimes = [];
+        let frameCount = 0;
+        let lastFPSTime = Date.now();
+        let lastCommandTime = 0;
 
-        // ============ PID CONTROLLER CLASS ============
-        class PIDController {
-            constructor(kp, ki, kd, outputMin, outputMax) {
-                this.kp = kp;
-                this.ki = ki;
-                this.kd = kd;
-                this.outputMin = outputMin;
-                this.outputMax = outputMax;
+        // ============ ADVANCED PID CASCADE CONTROLLER ============
+        class CascadePID {
+            constructor() {
+                // Position controller (outer loop)
+                this.positionKp = CONFIG.POSITION_KP;
+                this.positionKd = CONFIG.POSITION_KD;
+                this.lastPositionError = 0;
+                this.lastPositionTime = Date.now();
                 
-                this.lastError = 0;
-                this.integral = 0;
-                this.lastTime = Date.now();
+                // Velocity controller (inner loop)
+                this.velocityKp = CONFIG.VELOCITY_KP;
+                this.velocityIntegral = 0;
+                this.lastVelocityError = 0;
+                
+                // Speed controller
+                this.speedKp = CONFIG.SPEED_KP;
+                this.speedKd = CONFIG.SPEED_KD;
+                this.lastSpeedError = 0;
+                this.lastSpeedTime = Date.now();
             }
             
-            update(error) {
+            computeSteering(positionError, currentVelocity, targetVelocity) {
                 const now = Date.now();
-                const dt = (now - this.lastTime) / 1000; // Convert to seconds
+                const dt = Math.max((now - this.lastPositionTime) / 1000, 0.01);
                 
-                if (dt <= 0) return 0;
+                // Position control (outer loop) - generates desired velocity
+                const positionP = this.positionKp * positionError;
+                const positionD = this.positionKd * (positionError - this.lastPositionError) / dt;
+                const desiredVelocity = positionP + positionD + targetVelocity;
                 
-                // Proportional
-                const P = this.kp * error;
+                // Velocity control (inner loop) - generates steering command
+                const velocityError = desiredVelocity - currentVelocity;
+                const velocityP = this.velocityKp * velocityError;
                 
-                // Integral with anti-windup
-                this.integral += error * dt;
-                const maxIntegral = this.outputMax / (this.ki || 1);
-                this.integral = Math.max(-maxIntegral, Math.min(maxIntegral, this.integral));
-                const I = this.ki * this.integral;
+                let steering = velocityP;
+                steering = Math.max(-CONFIG.MAX_STEER, Math.min(CONFIG.MAX_STEER, steering));
                 
-                // Derivative
-                const derivative = (error - this.lastError) / dt;
-                const D = this.kd * derivative;
+                this.lastPositionError = positionError;
+                this.lastPositionTime = now;
+                this.lastVelocityError = velocityError;
                 
-                // Calculate output
-                let output = P + I + D;
+                return Math.round(steering);
+            }
+            
+            computeDrive(distanceError, approachVelocity) {
+                const now = Date.now();
+                const dt = Math.max((now - this.lastSpeedTime) / 1000, 0.01);
                 
-                // Clamp output
-                output = Math.max(this.outputMin, Math.min(this.outputMax, output));
+                // Feedforward + feedback control
+                const feedforward = approachVelocity * 100;
+                const P = this.speedKp * distanceError;
+                const D = this.speedKd * (distanceError - this.lastSpeedError) / dt;
                 
-                // Update state
-                this.lastError = error;
-                this.lastTime = now;
+                let drive = feedforward + P + D;
+                drive = Math.max(-CONFIG.MAX_DRIVE, Math.min(CONFIG.MAX_DRIVE, drive));
                 
-                return output;
+                // Apply minimum speed threshold
+                if (Math.abs(drive) > 0 && Math.abs(drive) < CONFIG.MIN_DRIVE) {
+                    drive = drive > 0 ? CONFIG.MIN_DRIVE : -CONFIG.MIN_DRIVE;
+                }
+                
+                this.lastSpeedError = distanceError;
+                this.lastSpeedTime = now;
+                
+                return Math.round(drive);
             }
             
             reset() {
-                this.lastError = 0;
-                this.integral = 0;
-                this.lastTime = Date.now();
-            }
-            
-            setGains(kp, ki, kd) {
-                this.kp = kp;
-                this.ki = ki;
-                this.kd = kd;
+                this.lastPositionError = 0;
+                this.lastVelocityError = 0;
+                this.velocityIntegral = 0;
+                this.lastSpeedError = 0;
+                this.lastPositionTime = Date.now();
+                this.lastSpeedTime = Date.now();
             }
         }
 
-        // ============ KALMAN FILTER CLASS ============
-        class KalmanFilter1D {
-            constructor(processNoise, measurementNoise) {
-                this.q = processNoise;      // Process noise
-                this.r = measurementNoise;  // Measurement noise
-                this.x = 0;                 // Estimated value
-                this.p = 1;                 // Estimation error covariance
-                this.k = 0;                 // Kalman gain
-            }
-            
-            update(measurement) {
-                // Prediction
-                // x = x (no change in prediction)
-                this.p = this.p + this.q;
-                
-                // Update
-                this.k = this.p / (this.p + this.r);
-                this.x = this.x + this.k * (measurement - this.x);
-                this.p = (1 - this.k) * this.p;
-                
-                return this.x;
-            }
-            
-            reset(value = 0) {
-                this.x = value;
-                this.p = 1;
-            }
-        }
-
-        // ============ PERSON TRACKER CLASS ============
-        class PersonTracker {
+        // ============ MOTION PREDICTOR WITH MEMORY ============
+        class MotionPredictor {
             constructor() {
-                this.trackedBBox = null;
-                this.lostCount = 0;
-                this.trackingHistory = [];
-                this.maxHistory = 5;
+                this.history = [];
+                this.maxHistory = 10;
+                this.velocity = { x: 0, y: 0 };
+                this.acceleration = { x: 0, y: 0 };
+                this.lastPosition = null;
+                this.lastTime = Date.now();
+                this.predictedPosition = null;
+                this.lostFrames = 0;
+                this.lastSeenDirection = null;
+            }
+            
+            update(position) {
+                const now = Date.now();
+                const dt = Math.max((now - this.lastTime) / 1000, 0.01);
+                
+                if (this.lastPosition) {
+                    // Calculate velocity
+                    const newVelX = (position.x - this.lastPosition.x) / dt;
+                    const newVelY = (position.y - this.lastPosition.y) / dt;
+                    
+                    // Smooth velocity with exponential moving average
+                    this.velocity.x = CONFIG.VELOCITY_ALPHA * newVelX + (1 - CONFIG.VELOCITY_ALPHA) * this.velocity.x;
+                    this.velocity.y = CONFIG.VELOCITY_ALPHA * newVelY + (1 - CONFIG.VELOCITY_ALPHA) * this.velocity.y;
+                    
+                    // Remember direction
+                    const speed = Math.sqrt(this.velocity.x ** 2 + this.velocity.y ** 2);
+                    if (speed > 10) {
+                        this.lastSeenDirection = Math.atan2(this.velocity.y, this.velocity.x);
+                    }
+                }
+                
+                this.history.push({ ...position, time: now });
+                if (this.history.length > this.maxHistory) {
+                    this.history.shift();
+                }
+                
+                this.lastPosition = position;
+                this.lastTime = now;
+                this.lostFrames = 0;
+                this.predictedPosition = null;
+            }
+            
+            predict(framesAhead = CONFIG.PREDICTION_HORIZON) {
+                if (!this.lastPosition) return null;
+                
+                this.lostFrames++;
+                
+                // Use constant velocity model with damping for lost frames
+                const damping = Math.exp(-this.lostFrames * 0.1);
+                const dt = framesAhead / 60; // Assume 60 FPS
+                
+                const predicted = {
+                    x: this.lastPosition.x + this.velocity.x * dt * damping,
+                    y: this.lastPosition.y + this.velocity.y * dt * damping,
+                    confidence: Math.max(0, 1 - this.lostFrames / CONFIG.LOST_TIMEOUT)
+                };
+                
+                this.predictedPosition = predicted;
+                return predicted;
+            }
+            
+            getVelocity() {
+                return this.velocity;
+            }
+            
+            getDirection() {
+                return this.lastSeenDirection;
+            }
+            
+            isLost() {
+                return this.lostFrames > CONFIG.LOST_TIMEOUT;
+            }
+            
+            reset() {
+                this.history = [];
+                this.velocity = { x: 0, y: 0 };
+                this.lastPosition = null;
+                this.predictedPosition = null;
+                this.lostFrames = 0;
+                this.lastSeenDirection = null;
+            }
+        }
+
+        // ============ OBSTACLE AVOIDANCE MANAGER ============
+        class ObstacleManager {
+            constructor() {
+                this.sensors = {
+                    fl: 100, fc: 100, fr: 100,
+                    l: 100, c: 100, r: 100
+                };
+                this.lastUpdate = Date.now();
+                this.enabled = true;
+            }
+            
+            updateSensors(sensorData) {
+                this.sensors = { ...this.sensors, ...sensorData };
+                this.lastUpdate = Date.now();
+                this.updateDisplay();
+            }
+            
+            checkPath(direction) {
+                // direction: 'forward', 'left', 'right', 'backward'
+                const stopDist = CONFIG.OBSTACLE_STOP_DISTANCE;
+                const slowDist = CONFIG.OBSTACLE_SLOW_DISTANCE;
+                
+                let isClear = true;
+                let needsSlow = false;
+                let alternateDirection = null;
+                
+                if (direction === 'forward') {
+                    if (this.sensors.fc < stopDist || this.sensors.fl < stopDist || this.sensors.fr < stopDist) {
+                        isClear = false;
+                        // Suggest alternate direction
+                        if (this.sensors.l > this.sensors.r) alternateDirection = 'left';
+                        else alternateDirection = 'right';
+                    } else if (this.sensors.fc < slowDist) {
+                        needsSlow = true;
+                    }
+                } else if (direction === 'left') {
+                    if (this.sensors.l < stopDist || this.sensors.fl < stopDist) {
+                        isClear = false;
+                    }
+                } else if (direction === 'right') {
+                    if (this.sensors.r < stopDist || this.sensors.fr < stopDist) {
+                        isClear = false;
+                    }
+                }
+                
+                return { isClear, needsSlow, alternateDirection };
+            }
+            
+            modifyCommand(drive, steer) {
+                if (!this.enabled) return { drive, steer };
+                
+                let modifiedDrive = drive;
+                let modifiedSteer = steer;
+                
+                // Forward motion check
+                if (drive > 0) {
+                    const pathCheck = this.checkPath('forward');
+                    if (!pathCheck.isClear) {
+                        modifiedDrive = 0;
+                        log('🚧 Obstacle ahead - STOPPED', 'warn');
+                        
+                        // Try to steer around
+                        if (pathCheck.alternateDirection === 'left') {
+                            modifiedSteer = -60;
+                        } else if (pathCheck.alternateDirection === 'right') {
+                            modifiedSteer = 60;
+                        }
+                    } else if (pathCheck.needsSlow) {
+                        modifiedDrive = Math.min(drive, CONFIG.MIN_DRIVE + 10);
+                        log('⚠️ Obstacle near - SLOWING', 'warn');
+                    }
+                }
+                
+                // Steering check
+                if (steer < -30) {
+                    const pathCheck = this.checkPath('left');
+                    if (!pathCheck.isClear) {
+                        modifiedSteer = Math.max(steer, -20);
+                        log('🚧 Obstacle left - LIMITED TURN', 'warn');
+                    }
+                } else if (steer > 30) {
+                    const pathCheck = this.checkPath('right');
+                    if (!pathCheck.isClear) {
+                        modifiedSteer = Math.min(steer, 20);
+                        log('🚧 Obstacle right - LIMITED TURN', 'warn');
+                    }
+                }
+                
+                return { drive: modifiedDrive, steer: modifiedSteer };
+            }
+            
+            updateDisplay() {
+                ['fl', 'fc', 'fr', 'l', 'c', 'r'].forEach(pos => {
+                    const el = document.getElementById(`sensor-${pos}`);
+                    const dist = this.sensors[pos];
+                    el.innerHTML = `${pos.toUpperCase()}<br>${dist}cm`;
+                    
+                    el.classList.remove('blocked', 'warning');
+                    if (dist < CONFIG.OBSTACLE_STOP_DISTANCE) {
+                        el.classList.add('blocked');
+                    } else if (dist < CONFIG.OBSTACLE_SLOW_DISTANCE) {
+                        el.classList.add('warning');
+                    }
+                });
+            }
+            
+            // Simulate sensors for demo (ESP32 would provide real data)
+            simulateSensors() {
+                this.sensors = {
+                    fl: 80 + Math.random() * 20,
+                    fc: 90 + Math.random() * 20,
+                    fr: 85 + Math.random() * 20,
+                    l: 70 + Math.random() * 30,
+                    c: 95 + Math.random() * 20,
+                    r: 75 + Math.random() * 25
+                };
+                this.updateDisplay();
+            }
+        }
+
+        // ============ COMMAND GENERATOR - ZERO DELAY ============
+        class CommandGenerator {
+            constructor() {
+                this.pidController = new CascadePID();
+                this.commandQueue = [];
+                this.lastCommand = { drive: 0, steer: 0 };
+            }
+            
+            generate(targetInfo, obstacles) {
+                if (!targetInfo) {
+                    return { drive: 0, steer: 0 };
+                }
+                
+                const { position, distance, velocity, predicted } = targetInfo;
+                
+                // Use predicted position if available
+                const effectivePos = predicted && predicted.confidence > 0.5 ? predicted : position;
+                
+                // Calculate errors
+                const centerX = canvas.width / 2;
+                const positionError = effectivePos.x - centerX;
+                const normalizedError = positionError / (canvas.width / 2);
+                
+                // Distance control
+                const distanceError = (distance - CONFIG.OPTIMAL_DISTANCE) / CONFIG.OPTIMAL_DISTANCE;
+                
+                // Generate commands with cascade PID
+                let steer = this.pidController.computeSteering(
+                    normalizedError,
+                    velocity.x,
+                    predicted ? velocity.x : 0
+                );
+                
+                let drive = this.pidController.computeDrive(
+                    distanceError,
+                    predicted ? velocity.y : 0
+                );
+                
+                // Apply obstacle avoidance
+                if (obstacles) {
+                    const modified = obstacles.modifyCommand(drive, steer);
+                    drive = modified.drive;
+                    steer = modified.steer;
+                }
+                
+                this.lastCommand = { drive, steer };
+                return { drive, steer };
+            }
+            
+            reset() {
+                this.pidController.reset();
+                this.lastCommand = { drive: 0, steer: 0 };
+            }
+        }
+
+        // ============ ADVANCED PERSON TRACKER ============
+        class AdvancedTracker {
+            constructor() {
+                this.trackedPerson = null;
+                this.trackingID = null;
+                this.lostFrames = 0;
+                this.confidence = 0;
+            }
+            
+            update(detections) {
+                if (!detections || detections.length === 0) {
+                    this.lostFrames++;
+                    if (this.lostFrames > CONFIG.LOST_TIMEOUT) {
+                        this.trackedPerson = null;
+                        this.confidence = 0;
+                    }
+                    return null;
+                }
+                
+                // First detection
+                if (!this.trackedPerson) {
+                    const largest = detections.reduce((max, p) => 
+                        (p.bbox[2] * p.bbox[3] > max.bbox[2] * max.bbox[3]) ? p : max
+                    );
+                    this.trackedPerson = largest;
+                    this.confidence = largest.score;
+                    this.lostFrames = 0;
+                    return this.getTargetInfo();
+                }
+                
+                // Track existing person using IOU
+                let bestMatch = null;
+                let bestIOU = 0.15;
+                
+                for (const person of detections) {
+                    const iou = this.calculateIOU(this.trackedPerson.bbox, person.bbox);
+                    if (iou > bestIOU) {
+                        bestIOU = iou;
+                        bestMatch = person;
+                    }
+                }
+                
+                if (bestMatch) {
+                    this.trackedPerson = bestMatch;
+                    this.confidence = bestMatch.score;
+                    this.lostFrames = 0;
+                } else {
+                    this.lostFrames++;
+                }
+                
+                return this.getTargetInfo();
             }
             
             calculateIOU(box1, box2) {
@@ -327,305 +753,269 @@
                 return intersection / union;
             }
             
-            update(people) {
-                if (people.length === 0) {
-                    this.lostCount++;
-                    if (this.lostCount > CONFIG.LOST_TIMEOUT) {
-                        this.trackedBBox = null;
-                    }
-                    return this.trackedBBox;
-                }
+            getTargetInfo() {
+                if (!this.trackedPerson) return null;
                 
-                // First detection - pick largest person
-                if (!this.trackedBBox) {
-                    const largest = people.reduce((max, p) => 
-                        (p.bbox[2] * p.bbox[3] > max.bbox[2] * max.bbox[3]) ? p : max
-                    );
-                    this.trackedBBox = largest.bbox;
-                    this.lostCount = 0;
-                    return this.trackedBBox;
-                }
+                const [x, y, w, h] = this.trackedPerson.bbox;
+                const centerX = x + w / 2;
+                const centerY = y + h / 2;
                 
-                // Track using IOU
-                let bestMatch = null;
-                let bestIOU = 0.2; // Minimum IOU threshold
-                
-                for (const person of people) {
-                    const iou = this.calculateIOU(this.trackedBBox, person.bbox);
-                    if (iou > bestIOU) {
-                        bestIOU = iou;
-                        bestMatch = person;
-                    }
-                }
-                
-                if (bestMatch) {
-                    this.trackedBBox = bestMatch.bbox;
-                    this.lostCount = 0;
-                } else {
-                    this.lostCount++;
-                    if (this.lostCount > CONFIG.LOST_TIMEOUT) {
-                        this.trackedBBox = null;
-                    }
-                }
-                
-                return this.trackedBBox;
+                return {
+                    bbox: this.trackedPerson.bbox,
+                    position: { x: centerX, y: centerY },
+                    size: { width: w, height: h },
+                    confidence: this.confidence,
+                    age: this.lostFrames
+                };
             }
             
             reset() {
-                this.trackedBBox = null;
-                this.lostCount = 0;
-                this.trackingHistory = [];
+                this.trackedPerson = null;
+                this.lostFrames = 0;
+                this.confidence = 0;
             }
         }
 
-        // ============ DECISION ENGINE ============
-        class FollowingStateMachine {
-            constructor() {
-                this.state = 'SEARCHING';
-                // States: SEARCHING, APPROACHING, FOLLOWING, TOO_CLOSE, LOST
+        // ============ JOYSTICK CONTROL ============
+        class VirtualJoystick {
+            constructor(containerId, stickId) {
+                this.container = document.getElementById(containerId);
+                this.stick = document.getElementById(stickId);
+                this.active = false;
+                this.centerX = 0;
+                this.centerY = 0;
+                this.maxDistance = 60;
+                this.currentX = 0;
+                this.currentY = 0;
+                
+                this.setupEvents();
             }
             
-            updateState(hasTarget, personSize) {
-                if (!hasTarget) {
-                    if (this.state !== 'LOST' && this.state !== 'SEARCHING') {
-                        this.state = 'LOST';
-                    } else if (lostFrames > CONFIG.LOST_TIMEOUT) {
-                        this.state = 'SEARCHING';
-                    }
-                } else {
-                    if (personSize < CONFIG.MIN_SIZE) {
-                        this.state = 'APPROACHING';
-                    } else if (personSize > CONFIG.MAX_SIZE) {
-                        this.state = 'TOO_CLOSE';
-                    } else {
-                        this.state = 'FOLLOWING';
-                    }
+            setupEvents() {
+                this.stick.addEventListener('mousedown', this.start.bind(this));
+                this.stick.addEventListener('touchstart', this.start.bind(this));
+                
+                document.addEventListener('mousemove', this.move.bind(this));
+                document.addEventListener('touchmove', this.move.bind(this));
+                
+                document.addEventListener('mouseup', this.end.bind(this));
+                document.addEventListener('touchend', this.end.bind(this));
+            }
+            
+            start(e) {
+                e.preventDefault();
+                this.active = true;
+                const rect = this.container.getBoundingClientRect();
+                this.centerX = rect.left + rect.width / 2;
+                this.centerY = rect.top + rect.height / 2;
+            }
+            
+            move(e) {
+                if (!this.active) return;
+                e.preventDefault();
+                
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                
+                let dx = clientX - this.centerX;
+                let dy = clientY - this.centerY;
+                
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance > this.maxDistance) {
+                    dx = (dx / distance) * this.maxDistance;
+                    dy = (dy / distance) * this.maxDistance;
                 }
                 
-                return this.state;
+                this.currentX = dx;
+                this.currentY = dy;
+                
+                this.stick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+            }
+            
+            end(e) {
+                if (!this.active) return;
+                e.preventDefault();
+                
+                this.active = false;
+                this.currentX = 0;
+                this.currentY = 0;
+                this.stick.style.transform = 'translate(-50%, -50%)';
+            }
+            
+            getCommand() {
+                const steer = Math.round((this.currentX / this.maxDistance) * 100);
+                const drive = Math.round((-this.currentY / this.maxDistance) * 100);
+                return { drive, steer };
             }
         }
 
-        // ============ INITIALIZATION ============
-        const personTracker = new PersonTracker();
-        const stateMachine = new FollowingStateMachine();
+        // ============ INITIALIZE SYSTEMS ============
+        targetTracker = new AdvancedTracker();
+        motionPredictor = new MotionPredictor();
+        obstacleManager = new ObstacleManager();
+        commandGenerator = new CommandGenerator();
+        const joystick = new VirtualJoystick('joystick-container', 'joystick-stick');
 
-        function validatePIDValue(value, min, max, defaultValue) {
-            const num = parseFloat(value);
-            if (isNaN(num) || num < min || num > max) {
-                return defaultValue;
-            }
-            return num;
-        }
-        
-        function initControllers() {
-            const steerKp = validatePIDValue(document.getElementById('steerKp').value, 0, 100, 2.5);
-            const steerKd = validatePIDValue(document.getElementById('steerKd').value, 0, 100, 1.2);
-            const speedKp = validatePIDValue(document.getElementById('speedKp').value, 0, 1000, 200);
-            
-            // Update UI with validated values
-            document.getElementById('steerKp').value = steerKp;
-            document.getElementById('steerKd').value = steerKd;
-            document.getElementById('speedKp').value = speedKp;
-            
-            steerPID = new PIDController(steerKp, 0, steerKd, -CONFIG.MAX_STEER, CONFIG.MAX_STEER);
-            speedPID = new PIDController(speedKp, 0, 10, -CONFIG.MAX_DRIVE, CONFIG.MAX_DRIVE);
-            
-            xFilter = new KalmanFilter1D(CONFIG.KALMAN_PROCESS_NOISE, CONFIG.KALMAN_MEASUREMENT_NOISE);
-            sizeFilter = new KalmanFilter1D(CONFIG.KALMAN_PROCESS_NOISE, CONFIG.KALMAN_MEASUREMENT_NOISE * 2);
-        }
-
-        // ============ INITIALIZATION - SIMPLIFIED LIKE REFERENCE CODE ============
+        // ============ MAIN INITIALIZATION ============
         async function init() {
-            log('🚀 Starting...', 'info');
-            updateDisplay('stateDisplay', 'INITIALIZING', 'warn');
+            log('🚀 Advanced Person Follower Starting...', 'info');
+            updateDisplay('modeDisplay', 'INITIALIZING', 'warn');
             
             try {
-                // Get ESP32 IP (optional - can start without it)
                 espIP = document.getElementById('espIP').value.trim();
-                if (espIP) {
-                    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
-                    if (!ipRegex.test(espIP)) {
-                        log('⚠️ Invalid IP format (optional)', 'warn');
-                        espIP = '';
-                    }
-                }
                 
-                // Request camera - EXACTLY like reference code
                 log('📷 Requesting camera...', 'info');
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'environment' }
+                    video: { 
+                        facingMode: 'environment',
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
                 });
                 
-                if (!stream) {
-                    throw new Error('No camera stream received');
-                }
-                
                 video.srcObject = stream;
-                log('✅ Camera stream assigned', 'success');
                 
-                // Wait for metadata - EXACTLY like reference code
                 await new Promise((resolve) => {
                     video.onloadedmetadata = () => {
                         canvas.width = video.videoWidth;
                         canvas.height = video.videoHeight;
                         log(`✅ Camera ready: ${canvas.width}x${canvas.height}`, 'success');
-                        updateDisplay('stateDisplay', 'LOADING AI...', 'warn');
                         resolve();
                     };
                 });
                 
-                // Load AI model
                 log('🧠 Loading AI model...', 'info');
                 model = await cocoSsd.load();
-                log('✅ AI loaded', 'success');
-                
-                // Initialize controllers
-                initControllers();
+                log('✅ AI model loaded', 'success');
                 
                 systemRunning = true;
                 document.getElementById('startBtn').textContent = 'STOP';
                 document.getElementById('startBtn').classList.add('active');
                 
-                log('✅ Ready', 'success');
-                log('💡 Commands are always calculated - Click "FOLLOW ON" to send to ESP32', 'info');
-                updateDisplay('stateDisplay', 'READY', 'success');
+                updateDisplay('modeDisplay', 'READY', 'success');
+                log('✅ System READY - Select mode: FOLLOW or REMOTE', 'success');
                 
-                // Start detection - use requestAnimationFrame like reference
                 detect();
+                startObstacleSimulation();
                 
             } catch (e) {
                 log('❌ Error: ' + e.message, 'error');
-                console.error('Init error:', e);
-                updateDisplay('stateDisplay', 'ERROR', 'error');
-                
-                // Show helpful error messages
-                if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
-                    log('💡 Please allow camera permissions', 'info');
-                } else if (e.name === 'NotFoundError') {
-                    log('💡 No camera found', 'info');
-                } else if (e.name === 'NotReadableError') {
-                    log('💡 Camera is being used by another app', 'info');
-                }
+                updateDisplay('modeDisplay', 'ERROR', 'error');
             }
         }
-        
-        async function startSystem() {
+
+        function startSystem() {
             if (systemRunning) {
                 stopSystem();
-                return;
+            } else {
+                init();
             }
-            init();
         }
 
         function stopSystem() {
             systemRunning = false;
             followActive = false;
+            remoteActive = false;
+            currentMode = 'STANDBY';
             
-            // Stop camera stream
-            if (video && video.srcObject) {
-                video.srcObject.getTracks().forEach(track => {
-                    track.stop();
-                    track.enabled = false;
-                });
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
                 video.srcObject = null;
             }
             
-            // Send stop command
             sendCommand(0, 0);
             
-            // Reset state
-            targetPerson = null;
-            lostFrames = 0;
-            personTracker.reset();
-            if (steerPID) steerPID.reset();
-            if (speedPID) speedPID.reset();
-            if (xFilter) xFilter.reset();
-            if (sizeFilter) sizeFilter.reset();
+            targetTracker.reset();
+            motionPredictor.reset();
+            commandGenerator.reset();
             
-            // Update UI
             document.getElementById('startBtn').textContent = 'START';
             document.getElementById('startBtn').classList.remove('active');
-            document.getElementById('followBtn').textContent = 'FOLLOW OFF';
             document.getElementById('followBtn').classList.remove('active');
-            document.getElementById('followBtn').style.borderColor = '#888';
-            document.getElementById('followBtn').style.color = '#888';
+            document.getElementById('remoteBtn').classList.remove('active');
+            document.getElementById('joystick-container').classList.remove('active');
+            document.getElementById('mode-indicator').classList.remove('active');
             
-            // Clear canvas
-            if (ctx) {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-            }
-            
-            // Reset status displays
-            updateDisplay('stateDisplay', 'STOPPED');
-            updateDisplay('targetX', '-');
-            updateDisplay('targetSize', '-');
-            updateDisplay('errorX', '-');
-            updateDisplay('errorSize', '-');
-            updateDisplay('steerOut', '0');
-            updateDisplay('driveOut', '0');
-            updateDisplay('confidence', '-');
-            updateDisplay('fps', '0');
-            
-            connectionStatus = 'disconnected';
-            consecutiveErrors = 0;
-            updateConnectionStatus();
-            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            updateDisplay('modeDisplay', 'STOPPED');
             log('System stopped', 'info');
         }
 
         function toggleFollow() {
             if (!systemRunning) {
-                log('⚠️ System not running!', 'warn');
+                log('⚠️ Start system first!', 'warn');
                 return;
             }
             
             followActive = !followActive;
-            const btn = document.getElementById('followBtn');
-            
             if (followActive) {
-                btn.textContent = 'FOLLOW ON';
-                btn.classList.add('active');
-                btn.style.borderColor = '#0f0';
-                btn.style.color = '#0f0';
-                log('✅ FOLLOW ENABLED - Commands will be sent to ESP32', 'success');
-                
-                // Check ESP32 IP
-                espIP = document.getElementById('espIP').value.trim();
-                if (!espIP) {
-                    log('⚠️ No ESP32 IP - Enter IP to send commands', 'warn');
-                    log('💡 Commands are still calculated and displayed', 'info');
-                } else {
-                    log(`📡 ESP32 IP: ${espIP} - Ready to control bot!`, 'success');
-                }
+                remoteActive = false;
+                currentMode = 'FOLLOW';
+                document.getElementById('followBtn').classList.add('active');
+                document.getElementById('remoteBtn').classList.remove('active');
+                document.getElementById('joystick-container').classList.remove('active');
+                showModeIndicator('FOLLOW MODE');
+                log('✅ FOLLOW MODE - Autonomous tracking enabled', 'success');
             } else {
-                btn.textContent = 'FOLLOW OFF';
-                btn.classList.remove('active');
-                btn.style.borderColor = '#888';
-                btn.style.color = '#888';
+                currentMode = 'STANDBY';
+                document.getElementById('followBtn').classList.remove('active');
                 sendCommand(0, 0);
-                log('⏸️ FOLLOW DISABLED - Commands displayed only', 'warn');
+                log('⏸️ Follow mode disabled', 'warn');
             }
+            updateDisplay('modeDisplay', currentMode);
         }
 
-        // ============ DETECTION LOOP - SIMPLIFIED LIKE REFERENCE CODE ============
+        function toggleRemote() {
+            if (!systemRunning) {
+                log('⚠️ Start system first!', 'warn');
+                return;
+            }
+            
+            remoteActive = !remoteActive;
+            if (remoteActive) {
+                followActive = false;
+                currentMode = 'REMOTE';
+                document.getElementById('remoteBtn').classList.add('active');
+                document.getElementById('followBtn').classList.remove('active');
+                document.getElementById('joystick-container').classList.add('active');
+                showModeIndicator('REMOTE CONTROL');
+                log('✅ REMOTE CONTROL - Use joystick to drive', 'success');
+                remoteControlLoop();
+            } else {
+                currentMode = 'STANDBY';
+                document.getElementById('remoteBtn').classList.remove('active');
+                document.getElementById('joystick-container').classList.remove('active');
+                sendCommand(0, 0);
+                log('⏸️ Remote control disabled', 'warn');
+            }
+            updateDisplay('modeDisplay', currentMode);
+        }
+
+        function showModeIndicator(text) {
+            const indicator = document.getElementById('mode-indicator');
+            indicator.textContent = text;
+            indicator.classList.add('active');
+            setTimeout(() => {
+                indicator.classList.remove('active');
+            }, 2000);
+        }
+
+        // ============ DETECTION LOOP ============
         async function detect() {
             if (!systemRunning || !model) {
                 requestAnimationFrame(detect);
                 return;
             }
             
-            // Clear canvas first
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
             try {
-                // Detect people - EXACTLY like reference code
                 const predictions = await model.detect(video);
                 const people = predictions.filter(p => 
                     p.class === 'person' && p.score >= CONFIG.MIN_CONFIDENCE
                 );
                 
-                // FPS calculation
+                // FPS
                 frameCount++;
                 if (Date.now() - lastFPSTime > 1000) {
                     updateDisplay('fps', frameCount);
@@ -633,209 +1023,183 @@
                     lastFPSTime = Date.now();
                 }
                 
-                // Update tracker
-                const bbox = personTracker.update(people);
-                
-                // Draw all detected people (for awareness) - make them more visible
-                people.forEach((person, index) => {
+                // Draw all detections
+                people.forEach((person, i) => {
                     const [x, y, w, h] = person.bbox;
-                    // Draw bounding box
-                    ctx.strokeStyle = 'rgba(255,255,0,0.8)';
-                    ctx.lineWidth = 3;
+                    ctx.strokeStyle = 'rgba(255,255,0,0.6)';
+                    ctx.lineWidth = 2;
                     ctx.strokeRect(x, y, w, h);
-                    
-                    // Draw label with confidence
-                    ctx.fillStyle = 'rgba(255,255,0,0.9)';
-                    ctx.font = '16px monospace';
-                    ctx.fillText(
-                        `Person ${index + 1}: ${(person.score * 100).toFixed(0)}%`,
-                        x,
-                        y > 20 ? y - 5 : y + 20
-                    );
+                    ctx.fillStyle = 'rgba(255,255,0,0.8)';
+                    ctx.font = '14px monospace';
+                    ctx.fillText(`P${i+1}: ${(person.score*100).toFixed(0)}%`, x, y-5);
                 });
                 
-                if (bbox) {
-                    targetPerson = bbox;
-                    lostFrames = 0;
+                // Update tracker
+                const targetInfo = targetTracker.update(people);
+                
+                if (targetInfo) {
+                    const { bbox, position, confidence } = targetInfo;
                     
+                    // Draw tracked target
                     const [x, y, w, h] = bbox;
-                    
-                    // Validate bbox values
-                    if (isNaN(x) || isNaN(y) || isNaN(w) || isNaN(h) || w <= 0 || h <= 0) {
-                        throw new Error('Invalid bounding box values');
-                    }
-                    
-                    // Draw target person - make it very visible
                     ctx.strokeStyle = '#00ff00';
-                    ctx.lineWidth = 5;
+                    ctx.lineWidth = 4;
                     ctx.strokeRect(x, y, w, h);
-                    
-                    // Draw filled rectangle with transparency
-                    ctx.fillStyle = 'rgba(0,255,0,0.1)';
+                    ctx.fillStyle = 'rgba(0,255,0,0.15)';
                     ctx.fillRect(x, y, w, h);
                     
-                    // Calculate center
-                    const centerX = x + w / 2;
-                    const centerY = y + h / 2;
-                    
-                    // Draw crosshair
+                    // Crosshair
                     ctx.strokeStyle = '#ff0000';
                     ctx.lineWidth = 3;
                     ctx.beginPath();
-                    ctx.moveTo(centerX - 20, centerY);
-                    ctx.lineTo(centerX + 20, centerY);
-                    ctx.moveTo(centerX, centerY - 20);
-                    ctx.lineTo(centerX, centerY + 20);
+                    ctx.moveTo(position.x - 25, position.y);
+                    ctx.lineTo(position.x + 25, position.y);
+                    ctx.moveTo(position.x, position.y - 25);
+                    ctx.lineTo(position.x, position.y + 25);
                     ctx.stroke();
                     
-                    // Smooth values with Kalman filter
-                    const smoothX = xFilter.update(centerX);
-                    const personSize = (w * h) / (canvas.width * canvas.height);
-                    const smoothSize = sizeFilter.update(personSize);
+                    // Update motion predictor
+                    motionPredictor.update(position);
                     
-                    // Update state machine
-                    const state = stateMachine.updateState(true, smoothSize);
-                    updateDisplay('stateDisplay', state, state === 'FOLLOWING' ? '' : 'warn');
+                    // Calculate distance
+                    const centerX = canvas.width / 2;
+                    const centerY = canvas.height / 2;
+                    const dx = position.x - centerX;
+                    const dy = position.y - centerY;
+                    const distance = Math.sqrt(dx*dx + dy*dy);
                     
-                    // Draw screen center line
-                    ctx.strokeStyle = 'rgba(0,255,255,0.5)';
-                    ctx.lineWidth = 2;
-                    ctx.setLineDash([10, 10]);
-                    ctx.beginPath();
-                    ctx.moveTo(canvas.width / 2, 0);
-                    ctx.lineTo(canvas.width / 2, canvas.height);
-                    ctx.stroke();
-                    ctx.setLineDash([]);
+                    // Get velocity
+                    const velocity = motionPredictor.getVelocity();
                     
-                    // Draw center indicator
-                    ctx.fillStyle = 'rgba(0,255,255,0.8)';
-                    ctx.beginPath();
-                    ctx.arc(canvas.width / 2, canvas.height / 2, 5, 0, Math.PI * 2);
-                    ctx.fill();
+                    // Update displays
+                    updateDisplay('targetStatus', 'LOCKED', '');
+                    updateDisplay('positionDisplay', `${position.x.toFixed(0)}, ${position.y.toFixed(0)}`);
+                    updateDisplay('velocityDisplay', `${velocity.x.toFixed(1)}, ${velocity.y.toFixed(1)}`);
+                    updateDisplay('distanceDisplay', distance.toFixed(0) + 'px');
+                    updateDisplay('predictionDisplay', 'TRACKING');
                     
-                    // Draw offset line
-                    ctx.strokeStyle = '#ffff00';
-                    ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    ctx.moveTo(canvas.width / 2, centerY);
-                    ctx.lineTo(smoothX, centerY);
-                    ctx.stroke();
-                    
-                    // Calculate distance and offset (like reference code)
-                    const fcx = canvas.width / 2;
-                    const fcy = canvas.height / 2;
-                    const dx = smoothX - fcx;
-                    const dy = centerY - fcy;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    
-                    // Update display
-                    updateDisplay('targetX', smoothX.toFixed(0));
-                    updateDisplay('targetSize', (smoothSize * 100).toFixed(1) + '%');
-                    updateDisplay('errorX', (dx).toFixed(0) + 'px');
-                    updateDisplay('errorSize', (dist).toFixed(0) + 'px');
-                    const matchedPerson = people.find(p => 
-                        Math.abs(p.bbox[0] - x) < 5 && 
-                        Math.abs(p.bbox[1] - y) < 5
-                    );
-                    updateDisplay('confidence', matchedPerson ? (matchedPerson.score * 100).toFixed(0) + '%' : '-');
-                    
-                    // ALWAYS calculate commands (like reference code)
-                    processPerson(centerX, centerY, dx, dy, dist, state);
+                    // Process in follow mode
+                    if (followActive) {
+                        const command = commandGenerator.generate({
+                            position,
+                            distance,
+                            velocity,
+                            predicted: null
+                        }, obstacleManager);
+                        
+                        sendCommand(command.drive, command.steer);
+                    }
                     
                 } else {
-                    lostFrames++;
-                    targetPerson = null;
+                    // Person lost - use prediction
+                    const predicted = motionPredictor.predict();
                     
-                    const state = stateMachine.updateState(false, 0);
-                    updateDisplay('stateDisplay', state, 'error');
-                    
-                    // Draw "No person detected" message on canvas
-                    ctx.fillStyle = 'rgba(255,0,0,0.7)';
-                    ctx.font = 'bold 24px monospace';
-                    ctx.textAlign = 'center';
-                    ctx.fillText('NO PERSON DETECTED', canvas.width / 2, canvas.height / 2);
-                    ctx.textAlign = 'left';
-                    
-                    // No person - send stop command
-                    sendCommand(0, 0);
-                    
-                    updateDisplay('targetX', 'LOST');
-                    updateDisplay('targetSize', '-');
-                    updateDisplay('errorX', '-');
-                    updateDisplay('errorSize', '-');
-                    updateDisplay('confidence', '-');
-                    
-                    // Log periodically when no person detected
-                    if (frameCount % 60 === 0) {
-                        log('No person detected in frame', 'warn');
+                    if (predicted && predicted.confidence > 0.3) {
+                        // Draw prediction
+                        ctx.strokeStyle = 'rgba(255,255,0,0.8)';
+                        ctx.setLineDash([10, 5]);
+                        ctx.lineWidth = 3;
+                        ctx.beginPath();
+                        ctx.arc(predicted.x, predicted.y, 40, 0, Math.PI * 2);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                        
+                        ctx.fillStyle = '#ffff00';
+                        ctx.font = 'bold 16px monospace';
+                        ctx.fillText('PREDICTED', predicted.x - 40, predicted.y - 50);
+                        
+                        updateDisplay('targetStatus', 'PREDICTING', 'warn');
+                        updateDisplay('predictionDisplay', `${(predicted.confidence*100).toFixed(0)}%`);
+                        
+                        // Continue following predicted position
+                        if (followActive) {
+                            const velocity = motionPredictor.getVelocity();
+                            const centerX = canvas.width / 2;
+                            const centerY = canvas.height / 2;
+                            const dx = predicted.x - centerX;
+                            const dy = predicted.y - centerY;
+                            const distance = Math.sqrt(dx*dx + dy*dy);
+                            
+                            const command = commandGenerator.generate({
+                                position: { x: predicted.x, y: predicted.y },
+                                distance,
+                                velocity,
+                                predicted
+                            }, obstacleManager);
+                            
+                            sendCommand(command.drive, command.steer);
+                        }
+                        
+                        document.getElementById('prediction-trail').classList.add('active');
+                        document.getElementById('prediction-trail').textContent = 
+                            `🎯 Predicting position - Confidence: ${(predicted.confidence*100).toFixed(0)}%`;
+                        
+                    } else {
+                        updateDisplay('targetStatus', 'LOST', 'error');
+                        updateDisplay('predictionDisplay', 'NO DATA');
+                        sendCommand(0, 0);
+                        
+                        document.getElementById('prediction-trail').classList.remove('active');
+                        
+                        ctx.fillStyle = 'rgba(255,0,0,0.7)';
+                        ctx.font = 'bold 28px monospace';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('TARGET LOST', canvas.width/2, canvas.height/2);
+                        ctx.textAlign = 'left';
                     }
                 }
+                
+                // Draw screen center
+                ctx.strokeStyle = 'rgba(0,255,255,0.4)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo(canvas.width/2, 0);
+                ctx.lineTo(canvas.width/2, canvas.height);
+                ctx.moveTo(0, canvas.height/2);
+                ctx.lineTo(canvas.width, canvas.height/2);
+                ctx.stroke();
+                ctx.setLineDash([]);
                 
             } catch (error) {
                 console.error('Detection error:', error);
             }
             
-            // Continue loop - EXACTLY like reference code
             requestAnimationFrame(detect);
         }
 
-        // ============ PROCESS PERSON - SIMPLIFIED LIKE REFERENCE CODE ============
-        function processPerson(cx, cy, dx, dy, dist, state) {
-            let drive = 0;
-            let steer = 0;
+        // ============ REMOTE CONTROL LOOP ============
+        function remoteControlLoop() {
+            if (!remoteActive) return;
             
-            // Simple control like reference code - ALWAYS calculate
-            if (followActive || true) { // Always calculate, but only send if followActive
-                // Steering: based on horizontal offset (like reference: dx/3)
-                steer = Math.round(Math.max(-100, Math.min(100, dx / 3)));
-                
-                // Drive: based on distance (like reference code)
-                if (dist > 150) {
-                    // Too far - move forward
-                    drive = Math.round(Math.min(100, 50 + (dist - 150) / 5));
-                } else if (dist < 100) {
-                    // Too close - move backward
-                    drive = -30;
-                } else {
-                    // Good distance - maintain position
-                    drive = 0;
+            const command = joystick.getCommand();
+            
+            // Apply obstacle avoidance
+            const modified = obstacleManager.modifyCommand(command.drive, command.steer);
+            
+            sendCommand(modified.drive, modified.steer);
+            
+            setTimeout(() => remoteControlLoop(), CONFIG.COMMAND_RATE);
+        }
+
+        // ============ OBSTACLE SIMULATION ============
+        function startObstacleSimulation() {
+            setInterval(() => {
+                if (systemRunning && document.getElementById('obstacleMode').checked) {
+                    obstacleManager.simulateSensors();
                 }
-                
-                // State-based adjustments
-                if (state === 'TOO_CLOSE') {
-                    drive = Math.min(drive, -20); // Force backward
-                } else if (state === 'APPROACHING') {
-                    drive = Math.max(drive, 25); // Ensure forward
-                }
-            }
-            
-            // Update display ALWAYS
-            updateDisplay('steerOut', steer, steer !== 0 ? 'warn' : '');
-            updateDisplay('driveOut', drive, drive !== 0 ? 'warn' : '');
-            
-            // Send command only if followActive
-            if (followActive) {
-                sendCommand(drive, steer);
-            }
+            }, CONFIG.OBSTACLE_CHECK_RATE);
         }
 
         // ============ COMMUNICATION ============
         let connectionStatus = 'disconnected';
         let consecutiveErrors = 0;
-        const MAX_CONSECUTIVE_ERRORS = 3;
         
         async function sendCommand(drive, steer) {
-            // Always update display with commands (even if not sending to ESP32)
-            updateDisplay('steerOut', steer, steer !== 0 ? 'warn' : '');
             updateDisplay('driveOut', drive, drive !== 0 ? 'warn' : '');
+            updateDisplay('steerOut', steer, steer !== 0 ? 'warn' : '');
             
-            // If no ESP32 IP, just log the command (for testing)
-            if (!espIP || espIP.trim() === '') {
-                if (Math.abs(drive) > 0 || Math.abs(steer) > 0) {
-                    log(`📡 CMD: Drive=${drive} Steer=${steer} (No ESP32 IP)`, 'info');
-                }
-                return;
-            }
+            if (!espIP) return;
             
             const now = Date.now();
             if (now - lastCommandTime < CONFIG.COMMAND_RATE) return;
@@ -844,9 +1208,9 @@
             try {
                 const url = `http://${espIP}/control?drive=${drive}&steer=${steer}`;
                 const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 2000);
+                const timeout = setTimeout(() => controller.abort(), 1500);
                 
-                const response = await fetch(url, { 
+                const response = await fetch(url, {
                     method: 'GET',
                     signal: controller.signal,
                     cache: 'no-cache'
@@ -858,77 +1222,40 @@
                     consecutiveErrors = 0;
                     if (connectionStatus !== 'connected') {
                         connectionStatus = 'connected';
-                        updateConnectionStatus();
-                    }
-                    // Log successful commands periodically
-                    if (Math.abs(drive) > 0 || Math.abs(steer) > 0) {
-                        log(`📡 Sent: Drive=${drive} Steer=${steer}`, 'success');
-                    }
-                } else {
-                    consecutiveErrors++;
-                    if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS && connectionStatus !== 'error') {
-                        connectionStatus = 'error';
-                        updateConnectionStatus();
-                        log(`ESP32 connection error: HTTP ${response.status}`, 'error');
+                        updateConnectionDisplay();
+                        log('✅ ESP32 connected', 'success');
                     }
                 }
             } catch (error) {
-                if (error.name !== 'AbortError') {
-                    consecutiveErrors++;
-                    if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                        if (connectionStatus !== 'error') {
-                            connectionStatus = 'error';
-                            updateConnectionStatus();
-                        }
-                        // Only log every 10th error to avoid spam
-                        if (consecutiveErrors % 10 === 0) {
-                            log(`ESP32 connection failed: ${error.message}`, 'error');
-                        }
-                    }
+                consecutiveErrors++;
+                if (consecutiveErrors >= 3 && connectionStatus !== 'error') {
+                    connectionStatus = 'error';
+                    updateConnectionDisplay();
                 }
-            }
-        }
-        
-        function updateConnectionStatus() {
-            const statusEl = document.getElementById('connectionStatus');
-            if (statusEl) {
-                statusEl.textContent = connectionStatus === 'connected' ? 'CONNECTED' : 
-                                      connectionStatus === 'error' ? 'DISCONNECTED' : 'CONNECTING';
-                statusEl.className = 'status-value ' + 
-                    (connectionStatus === 'connected' ? '' : 
-                     connectionStatus === 'error' ? 'error' : 'warn');
             }
         }
 
-        async function emergencyStop() {
+        function updateConnectionDisplay() {
+            updateDisplay('connectionStatus', 
+                connectionStatus === 'connected' ? 'CONNECTED' : 'DISCONNECTED',
+                connectionStatus === 'connected' ? '' : 'error');
+        }
+
+        function emergencyStop() {
             followActive = false;
+            remoteActive = false;
+            currentMode = 'EMERGENCY';
             
-            // Send stop command immediately
             sendCommand(0, 0);
             
-            // Also try emergency endpoint
-            if (espIP) {
-                try {
-                    const controller = new AbortController();
-                    const timeout = setTimeout(() => controller.abort(), 2000);
-                    await fetch(`http://${espIP}/emergency`, { 
-                        method: 'GET',
-                        signal: controller.signal,
-                        cache: 'no-cache'
-                    });
-                    clearTimeout(timeout);
-                    log('EMERGENCY STOP executed!', 'error');
-                } catch (error) {
-                    if (error.name !== 'AbortError') {
-                        log('Emergency stop command sent (ESP32 may be offline)', 'warn');
-                    }
-                }
-            }
-            
-            document.getElementById('followBtn').textContent = 'FOLLOW OFF';
             document.getElementById('followBtn').classList.remove('active');
-            document.getElementById('followBtn').style.borderColor = '#888';
-            document.getElementById('followBtn').style.color = '#888';
+            document.getElementById('remoteBtn').classList.remove('active');
+            document.getElementById('joystick-container').classList.remove('active');
+            
+            updateDisplay('modeDisplay', 'E-STOP', 'error');
+            log('🛑 EMERGENCY STOP ACTIVATED!', 'error');
+            
+            showModeIndicator('EMERGENCY STOP');
         }
 
         // ============ UI HELPERS ============
@@ -942,132 +1269,29 @@
 
         function log(message, type = 'info') {
             const telemetry = document.getElementById('telemetry');
-            if (!telemetry) return;
-            
             const entry = document.createElement('div');
             entry.className = 'log ' + type;
             const time = new Date().toLocaleTimeString();
             entry.textContent = `[${time}] ${message}`;
             telemetry.insertBefore(entry, telemetry.firstChild);
             
-            // Limit log entries to prevent memory issues
-            while (telemetry.children.length > 50) {
+            while (telemetry.children.length > 40) {
                 telemetry.removeChild(telemetry.lastChild);
-            }
-            
-            // Also log to console for debugging
-            if (type === 'error') {
-                console.error(`[PersonFollower] ${message}`);
-            } else if (type === 'warn') {
-                console.warn(`[PersonFollower] ${message}`);
-            } else {
-                console.log(`[PersonFollower] ${message}`);
             }
         }
 
-        // ============ DIAGNOSTICS ============
-        function checkCameraStatus() {
-            const status = {
-                videoElement: !!video,
-                videoSrcObject: !!(video && video.srcObject),
-                videoReadyState: video ? video.readyState : -1,
-                videoPaused: video ? video.paused : true,
-                videoEnded: video ? video.ended : true,
-                videoWidth: video ? video.videoWidth : 0,
-                videoHeight: video ? video.videoHeight : 0,
-                canvasWidth: canvas ? canvas.width : 0,
-                canvasHeight: canvas ? canvas.height : 0,
-                modelLoaded: !!model,
-                systemRunning: systemRunning,
-                videoVisible: video ? (video.offsetWidth > 0 && video.offsetHeight > 0) : false,
-                videoDisplay: video ? window.getComputedStyle(video).display : 'none',
-                videoVisibility: video ? window.getComputedStyle(video).visibility : 'hidden'
-            };
-            
-            log('=== Camera Diagnostics ===', 'info');
-            log(`Video element exists: ${status.videoElement}`, status.videoElement ? 'success' : 'error');
-            log(`Video stream active: ${status.videoSrcObject}`, status.videoSrcObject ? 'success' : 'error');
-            log(`Video readyState: ${status.videoReadyState} (2=HAVE_CURRENT_DATA, 4=HAVE_ENOUGH_DATA)`, 'info');
-            log(`Video paused: ${status.videoPaused}`, status.videoPaused ? 'error' : 'success');
-            log(`Video size: ${status.videoWidth}x${status.videoHeight}`, status.videoWidth > 0 ? 'success' : 'error');
-            log(`Video visible: ${status.videoVisible} (display: ${status.videoDisplay}, visibility: ${status.videoVisibility})`, status.videoVisible ? 'success' : 'error');
-            log(`Canvas size: ${status.canvasWidth}x${status.canvasHeight}`, status.canvasWidth > 0 ? 'success' : 'error');
-            log(`AI Model loaded: ${status.modelLoaded}`, status.modelLoaded ? 'success' : 'error');
-            log(`System running: ${status.systemRunning}`, status.systemRunning ? 'success' : 'warn');
-            log(`Detection processing: ${isProcessing}`, 'info');
-            
-            // Test video frame capture
-            if (video && video.readyState >= 2 && canvas.width > 0) {
-                try {
-                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                    const imageData = ctx.getImageData(0, 0, 1, 1);
-                    const hasData = imageData.data.some(val => val !== 0);
-                    log(`Video frame capture test: ${hasData ? 'SUCCESS - frames are updating' : 'FAILED - no frame data'}`, hasData ? 'success' : 'error');
-                } catch (e) {
-                    log(`Video frame capture test failed: ${e.message}`, 'error');
-                }
-            }
-            
-            console.log('Full diagnostic status:', status);
-            return status;
-        }
-        
-        // ============ INITIALIZATION ============
-        // Initialize connection status on load
-        window.addEventListener('DOMContentLoaded', () => {
-            updateConnectionStatus();
-            
-            // Load saved ESP32 IP if available (with error handling for tracking prevention)
-            try {
-                const savedIP = localStorage.getItem('esp32IP');
-                if (savedIP) {
-                    document.getElementById('espIP').value = savedIP;
-                }
-                
-                // Save IP when changed
-                document.getElementById('espIP').addEventListener('change', (e) => {
-                    try {
-                        localStorage.setItem('esp32IP', e.target.value);
-                    } catch (err) {
-                        // Ignore localStorage errors (tracking prevention)
-                        console.log('LocalStorage not available (tracking prevention enabled)');
-                    }
-                });
-            } catch (err) {
-                // LocalStorage blocked - that's okay, just continue without saving
-                console.log('LocalStorage not available');
-            }
-            
-            // Add diagnostic button (for debugging)
-            const controls = document.getElementById('controls');
-            const diagBtn = document.createElement('button');
-            diagBtn.textContent = 'DIAGNOSTICS';
-            diagBtn.onclick = checkCameraStatus;
-            diagBtn.style.marginTop = '5px';
-            diagBtn.style.fontSize = '10px';
-            controls.appendChild(diagBtn);
-        });
-        
         // ============ CLEANUP ============
         window.addEventListener('beforeunload', () => {
             if (systemRunning) {
                 sendCommand(0, 0);
-                if (video && video.srcObject) {
+                if (video.srcObject) {
                     video.srcObject.getTracks().forEach(track => track.stop());
                 }
             }
         });
-        
-        // Handle page visibility changes
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden && systemRunning) {
-                // Pause when tab is hidden to save resources
-                sendCommand(0, 0);
-            }
-        });
-        
-        // Auto-start like reference code
-        init();
+
+        // Auto-start
+        setTimeout(() => init(), 500);
     </script>
 </body>
 </html>
