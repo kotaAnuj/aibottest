@@ -1,118 +1,126 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8">
-    <title>Object Tracking + Direction Commands</title>
-    <style>
-        body { font-family: Arial; text-align: center; background: #111; color: #fff; }
-        #video, #canvas { width: 80%; max-width: 400px; margin-top: 10px; border-radius: 10px; }
-        #command { font-size: 22px; margin-top: 20px; font-weight: bold; }
-    </style>
+  <meta charset="UTF-8">
+  <title>AI Object Tracking + Commands</title>
+  <style>
+      body { background:#111; color:white; text-align:center; font-family:Arial; }
+      video, canvas { width:80%; max-width:400px; margin-top:10px; border-radius:10px; }
+      #cmd { font-size:25px; margin-top:20px; }
+  </style>
 </head>
 <body>
 
-<h2>Object Tracking + Direction Detection</h2>
+<h2>AI Object Tracking + Direction Commands</h2>
 <video id="video" autoplay playsinline></video>
 <canvas id="canvas"></canvas>
-<div id="command">Detecting...</div>
+<div id="cmd">Loading model…</div>
+
+<!-- Load TensorFlow + COCO-SSD Model -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.20.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
 
 <script>
-    const video = document.getElementById("video");
-    const canvas = document.getElementById("canvas");
-    const ctx = canvas.getContext("2d");
-    const commandBox = document.getElementById("command");
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const cmdBox = document.getElementById("cmd");
 
-    // Ask for camera
-    navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
-        video.srcObject = stream;
-    });
+// 1. Start Camera
+navigator.mediaDevices.getUserMedia({ video:true }).then(stream => {
+    video.srcObject = stream;
+});
 
-    video.addEventListener("loadeddata", () => {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        track();
-    });
+// 2. Load Model
+let model;
+cocoSsd.load().then(m => {
+    model = m;
+    cmdBox.innerText = "Model Ready — Detecting…";
+    detectLoop();
+});
 
-    function track() {
+// 3. Main detection loop
+function detectLoop() {
+    if (!model) return requestAnimationFrame(detectLoop);
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    model.detect(video).then(predictions => {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        let frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        let data = frame.data;
 
-        let targetColor = { r: 255, g: 0, b: 0 }; // TRACKING RED OBJECT
-        let threshold = 80;
+        let target = null;
 
-        let cx = 0, cy = 0, count = 0;
-
-        // Scan pixels
-        for (let i = 0; i < data.length; i += 4) {
-            let r = data[i];
-            let g = data[i + 1];
-            let b = data[i + 2];
-
-            if (Math.abs(r - targetColor.r) < threshold &&
-                Math.abs(g - targetColor.g) < threshold &&
-                Math.abs(b - targetColor.b) < threshold) {
-
-                let pixelIndex = i / 4;
-                let x = pixelIndex % canvas.width;
-                let y = Math.floor(pixelIndex / canvas.width);
-
-                cx += x;
-                cy += y;
-                count++;
-
-                // Mark detected pixel
-                data[i] = 0;    // color pixels blue
-                data[i + 1] = 0;
-                data[i + 2] = 255;
+        // find PERSON first
+        for (let p of predictions) {
+            if (p.class === "person" && p.score > 0.5) {
+                target = p; break;
             }
         }
 
-        ctx.putImageData(frame, 0, 0);
+        // if no person → take first object
+        if (!target && predictions.length > 0) {
+            target = predictions[0];
+        }
 
-        if (count > 50) {
-            cx /= count;
-            cy /= count;
+        if (target) {
+            let [x, y, w, h] = target.bbox;
+            let cx = x + w/2;
+            let cy = y + h/2;
+
+            // Draw box
+            ctx.strokeStyle = "lime";
+            ctx.lineWidth = 3;
+            ctx.strokeRect(x, y, w, h);
 
             // Draw center dot
             ctx.beginPath();
-            ctx.arc(cx, cy, 10, 0, 2 * Math.PI);
+            ctx.arc(cx, cy, 8, 0, Math.PI*2);
             ctx.fillStyle = "yellow";
             ctx.fill();
 
-            checkDirection(cx, cy);
+            // Show label
+            ctx.fillStyle = "white";
+            ctx.font = "20px Arial";
+            ctx.fillText(target.class, x, y-5);
+
+            // Direction logic
+            giveDirection(cx, cy, w, h);
         } else {
-            commandBox.innerText = "Object not found!";
+            cmdBox.innerText = "No object detected";
         }
 
-        requestAnimationFrame(track);
+        requestAnimationFrame(detectLoop);
+    });
+}
+
+// 4. Direction Logic
+function giveDirection(cx, cy, w, h) {
+    let midX = canvas.width / 2;
+    let midY = canvas.height / 2;
+
+    let tol = 40;
+    let dist = w * h;
+
+    let cmd = "";
+
+    // LEFT / RIGHT based on x
+    if (cx < midX - tol) cmd += "Move Right (Object is Left)\n";
+    else if (cx > midX + tol) cmd += "Move Left (Object is Right)\n";
+    else cmd += "Aligned Left/Right ✓\n";
+
+    // FORWARD / BACK based on size of box
+    if (dist < 80000) cmd += "Go Closer (Object Far)\n";
+    else if (dist > 200000) cmd += "Go Back (Object Too Close)\n";
+    else cmd += "Distance OK ✓\n";
+
+    // PERFECT CENTER
+    if (Math.abs(cx - midX) < tol && dist > 80000 && dist < 200000) {
+        cmd = "Perfectly Centered ✔";
     }
 
-    function checkDirection(x, y) {
-        let midX = canvas.width / 2;
-        let midY = canvas.height / 2;
-
-        let tolerance = 40;
-
-        let cmd = "";
-
-        // LEFT / RIGHT
-        if (x < midX - tolerance) cmd += "Move Right (object is LEFT)\n";
-        else if (x > midX + tolerance) cmd += "Move Left (object is RIGHT)\n";
-        else cmd += "Aligned Left/Right\n";
-
-        // UP / DOWN (distance simulation)
-        if (y < midY - tolerance) cmd += "Move Forward (object UP)\n";
-        else if (y > midY + tolerance) cmd += "Move Backward (object DOWN)\n";
-        else cmd += "Aligned Up/Down\n";
-
-        // PERFECTLY CENTERED
-        if (Math.abs(x - midX) < tolerance && Math.abs(y - midY) < tolerance) {
-            cmd = "Object Centered ✔";
-        }
-
-        commandBox.innerText = cmd;
-    }
+    cmdBox.innerText = cmd;
+}
 </script>
 
 </body>
