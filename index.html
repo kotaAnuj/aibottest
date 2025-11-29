@@ -1,127 +1,1297 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>AI Object Tracking + Commands</title>
-  <style>
-      body { background:#111; color:white; text-align:center; font-family:Arial; }
-      video, canvas { width:80%; max-width:400px; margin-top:10px; border-radius:10px; }
-      #cmd { font-size:25px; margin-top:20px; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Person Follower Pro</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Courier New', monospace;
+            background: #000;
+            color: #0f0;
+            overflow: hidden;
+        }
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        #videoElement {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+            z-index: 1;
+        }
+        #canvas {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1);
+            z-index: 2;
+            pointer-events: none;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.9);
+            padding: 15px;
+            border: 2px solid #0f0;
+            border-radius: 8px;
+            z-index: 100;
+            max-width: 280px;
+        }
+        #controls input { 
+            background: #000;
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 5px;
+            margin: 5px 0;
+            width: 100%;
+            font-family: monospace;
+        }
+        #controls button {
+            background: #000;
+            color: #0f0;
+            border: 2px solid #0f0;
+            padding: 10px 15px;
+            cursor: pointer;
+            margin: 5px 2px;
+            font-family: monospace;
+            font-weight: bold;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+        #controls button:hover { background: #0f0; color: #000; transform: scale(1.05); }
+        #controls button.active { background: #0f0; color: #000; }
+        #controls button.danger { border-color: #f00; color: #f00; }
+        #controls button.danger:hover { background: #f00; color: #fff; }
+        
+        #status {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.9);
+            padding: 15px;
+            border: 2px solid #0f0;
+            border-radius: 8px;
+            min-width: 320px;
+            z-index: 100;
+        }
+        .status-row { 
+            display: flex;
+            justify-content: space-between;
+            margin: 4px 0;
+            font-size: 13px;
+        }
+        .status-label { color: #888; }
+        .status-value { color: #0f0; font-weight: bold; }
+        .status-value.warn { color: #ff0; }
+        .status-value.error { color: #f00; }
+        
+        #joystick-container {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 180px;
+            height: 180px;
+            background: rgba(0,0,0,0.8);
+            border: 3px solid #0f0;
+            border-radius: 50%;
+            z-index: 99;
+            display: none;
+        }
+        #joystick-container.active { display: block; }
+        #joystick-base {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+        }
+        #joystick-stick {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            background: #0f0;
+            border: 3px solid #0ff;
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            cursor: pointer;
+            box-shadow: 0 0 20px #0f0;
+        }
+        
+        #obstacle-display {
+            position: absolute;
+            bottom: 20px;
+            left: 10px;
+            background: rgba(0,0,0,0.9);
+            padding: 15px;
+            border: 2px solid #0f0;
+            border-radius: 8px;
+            z-index: 100;
+        }
+        .obstacle-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .obstacle-sensor {
+            width: 50px;
+            height: 50px;
+            background: #002200;
+            border: 2px solid #0f0;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            transition: all 0.3s;
+        }
+        .obstacle-sensor.blocked {
+            background: #ff0000;
+            border-color: #ff0000;
+            box-shadow: 0 0 15px #ff0000;
+        }
+        .obstacle-sensor.warning {
+            background: #ffaa00;
+            border-color: #ffaa00;
+        }
+        
+        #telemetry {
+            position: absolute;
+            bottom: 220px;
+            left: 10px;
+            background: rgba(0,0,0,0.9);
+            padding: 10px;
+            border: 2px solid #0f0;
+            border-radius: 8px;
+            max-height: 150px;
+            overflow-y: auto;
+            width: 420px;
+            z-index: 100;
+            font-size: 11px;
+        }
+        .log { margin: 2px 0; }
+        .log.info { color: #0ff; }
+        .log.warn { color: #ff0; }
+        .log.error { color: #f00; }
+        .log.success { color: #0f0; }
+        
+        .mode-indicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.8);
+            padding: 20px 40px;
+            border: 3px solid #0f0;
+            border-radius: 10px;
+            font-size: 24px;
+            font-weight: bold;
+            z-index: 98;
+            display: none;
+            animation: pulse 2s infinite;
+        }
+        .mode-indicator.active { display: block; }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 0.8; transform: translate(-50%, -50%) scale(1); }
+            50% { opacity: 1; transform: translate(-50%, -50%) scale(1.05); }
+        }
+        
+        #prediction-trail {
+            position: absolute;
+            top: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.9);
+            padding: 10px 20px;
+            border: 2px solid #ff0;
+            border-radius: 8px;
+            z-index: 100;
+            display: none;
+            font-size: 12px;
+        }
+        #prediction-trail.active { display: block; }
+    </style>
 </head>
 <body>
+    <div id="container">
+        <video id="videoElement" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+        
+        <div id="controls">
+            <div><input type="text" id="espIP" placeholder="ESP32 IP (192.168.x.x)"></div>
+            <div style="display: flex; flex-wrap: wrap;">
+                <button id="startBtn" onclick="startSystem()">START</button>
+                <button id="followBtn" onclick="toggleFollow()">FOLLOW</button>
+                <button id="remoteBtn" onclick="toggleRemote()">REMOTE</button>
+                <button class="danger" onclick="emergencyStop()">E-STOP</button>
+            </div>
+            <div style="margin-top: 10px; font-size: 10px; border-top: 1px solid #0f0; padding-top: 10px;">
+                <div style="color: #888;">Advanced Controls:</div>
+                <div style="display: flex; justify-content: space-between; margin-top: 5px;">
+                    <label><input type="checkbox" id="predictionMode" checked> Prediction</label>
+                    <label><input type="checkbox" id="obstacleMode" checked> Obstacles</label>
+                </div>
+            </div>
+        </div>
+        
+        <div id="status">
+            <div class="status-row"><span class="status-label">Mode:</span><span class="status-value" id="modeDisplay">STANDBY</span></div>
+            <div class="status-row"><span class="status-label">ESP32:</span><span class="status-value" id="connectionStatus">DISCONNECTED</span></div>
+            <div class="status-row"><span class="status-label">Target:</span><span class="status-value" id="targetStatus">NO TARGET</span></div>
+            <div class="status-row"><span class="status-label">Position:</span><span class="status-value" id="positionDisplay">-</span></div>
+            <div class="status-row"><span class="status-label">Velocity:</span><span class="status-value" id="velocityDisplay">-</span></div>
+            <div class="status-row"><span class="status-label">Distance:</span><span class="status-value" id="distanceDisplay">-</span></div>
+            <div class="status-row"><span class="status-label">Prediction:</span><span class="status-value" id="predictionDisplay">-</span></div>
+            <div class="status-row"><span class="status-label">Drive:</span><span class="status-value" id="driveOut">0</span></div>
+            <div class="status-row"><span class="status-label">Steer:</span><span class="status-value" id="steerOut">0</span></div>
+            <div class="status-row"><span class="status-label">FPS:</span><span class="status-value" id="fps">0</span></div>
+        </div>
+        
+        <div id="joystick-container">
+            <div id="joystick-base"></div>
+            <div id="joystick-stick"></div>
+        </div>
+        
+        <div id="obstacle-display">
+            <div style="text-align: center; margin-bottom: 5px;">PROXIMITY</div>
+            <div class="obstacle-grid">
+                <div class="obstacle-sensor" id="sensor-fl">FL<br>-</div>
+                <div class="obstacle-sensor" id="sensor-fc">FC<br>-</div>
+                <div class="obstacle-sensor" id="sensor-fr">FR<br>-</div>
+                <div class="obstacle-sensor" id="sensor-l">L<br>-</div>
+                <div class="obstacle-sensor" id="sensor-c">C<br>-</div>
+                <div class="obstacle-sensor" id="sensor-r">R<br>-</div>
+            </div>
+        </div>
+        
+        <div id="telemetry"></div>
+        <div id="mode-indicator" class="mode-indicator"></div>
+        <div id="prediction-trail"></div>
+    </div>
 
-<h2>AI Object Tracking + Direction Commands</h2>
-<video id="video" autoplay playsinline></video>
-<canvas id="canvas"></canvas>
-<div id="cmd">Loading model…</div>
+    <script>
+        // ============ ADVANCED CONFIGURATION ============
+        const CONFIG = {
+            // Target parameters
+            TARGET_SIZE: 0.22,
+            MIN_SIZE: 0.10,
+            MAX_SIZE: 0.40,
+            OPTIMAL_DISTANCE: 130,
+            MIN_DISTANCE: 80,
+            MAX_DISTANCE: 250,
+            
+            // Dead zones
+            CENTER_DEADZONE: 0.06,
+            SIZE_DEADZONE: 0.04,
+            
+            // Speed limits
+            MAX_DRIVE: 80,
+            MAX_STEER: 100,
+            MIN_DRIVE: 20,
+            BACKUP_SPEED: -35,
+            
+            // Control rates
+            DETECTION_RATE: 50,
+            COMMAND_RATE: 50,
+            
+            // Tracking & Prediction
+            LOST_TIMEOUT: 30,
+            MIN_CONFIDENCE: 0.45,
+            PREDICTION_HORIZON: 15,
+            VELOCITY_ALPHA: 0.3,
+            
+            // Obstacle avoidance
+            OBSTACLE_STOP_DISTANCE: 25,
+            OBSTACLE_SLOW_DISTANCE: 50,
+            OBSTACLE_CHECK_RATE: 100,
+            
+            // PID Gains - Cascade Control
+            POSITION_KP: 3.2,
+            POSITION_KD: 1.8,
+            VELOCITY_KP: 0.8,
+            SPEED_KP: 220,
+            SPEED_KD: 15,
+        };
 
-<!-- Load TensorFlow + COCO-SSD Model -->
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.20.0"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+        // ============ GLOBAL STATE ============
+        const video = document.getElementById('videoElement');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let model = null;
+        let systemRunning = false;
+        let followActive = false;
+        let remoteActive = false;
+        let espIP = '';
+        
+        // Control modes
+        let currentMode = 'STANDBY'; // STANDBY, FOLLOW, REMOTE, EMERGENCY
+        
+        // Advanced tracking
+        let targetTracker = null;
+        let motionPredictor = null;
+        let obstacleManager = null;
+        let commandGenerator = null;
+        
+        // Performance
+        let frameCount = 0;
+        let lastFPSTime = Date.now();
+        let lastCommandTime = 0;
 
-<script>
-const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-const cmdBox = document.getElementById("cmd");
-
-// 1. Start Camera
-navigator.mediaDevices.getUserMedia({ video:true }).then(stream => {
-    video.srcObject = stream;
-});
-
-// 2. Load Model
-let model;
-cocoSsd.load().then(m => {
-    model = m;
-    cmdBox.innerText = "Model Ready — Detecting…";
-    detectLoop();
-});
-
-// 3. Main detection loop
-function detectLoop() {
-    if (!model) return requestAnimationFrame(detectLoop);
-
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-
-    model.detect(video).then(predictions => {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-        let target = null;
-
-        // find PERSON first
-        for (let p of predictions) {
-            if (p.class === "person" && p.score > 0.5) {
-                target = p; break;
+        // ============ ADVANCED PID CASCADE CONTROLLER ============
+        class CascadePID {
+            constructor() {
+                // Position controller (outer loop)
+                this.positionKp = CONFIG.POSITION_KP;
+                this.positionKd = CONFIG.POSITION_KD;
+                this.lastPositionError = 0;
+                this.lastPositionTime = Date.now();
+                
+                // Velocity controller (inner loop)
+                this.velocityKp = CONFIG.VELOCITY_KP;
+                this.velocityIntegral = 0;
+                this.lastVelocityError = 0;
+                
+                // Speed controller
+                this.speedKp = CONFIG.SPEED_KP;
+                this.speedKd = CONFIG.SPEED_KD;
+                this.lastSpeedError = 0;
+                this.lastSpeedTime = Date.now();
+            }
+            
+            computeSteering(positionError, currentVelocity, targetVelocity) {
+                const now = Date.now();
+                const dt = Math.max((now - this.lastPositionTime) / 1000, 0.01);
+                
+                // Position control (outer loop) - generates desired velocity
+                const positionP = this.positionKp * positionError;
+                const positionD = this.positionKd * (positionError - this.lastPositionError) / dt;
+                const desiredVelocity = positionP + positionD + targetVelocity;
+                
+                // Velocity control (inner loop) - generates steering command
+                const velocityError = desiredVelocity - currentVelocity;
+                const velocityP = this.velocityKp * velocityError;
+                
+                let steering = velocityP;
+                steering = Math.max(-CONFIG.MAX_STEER, Math.min(CONFIG.MAX_STEER, steering));
+                
+                this.lastPositionError = positionError;
+                this.lastPositionTime = now;
+                this.lastVelocityError = velocityError;
+                
+                return Math.round(steering);
+            }
+            
+            computeDrive(distanceError, approachVelocity) {
+                const now = Date.now();
+                const dt = Math.max((now - this.lastSpeedTime) / 1000, 0.01);
+                
+                // Feedforward + feedback control
+                const feedforward = approachVelocity * 100;
+                const P = this.speedKp * distanceError;
+                const D = this.speedKd * (distanceError - this.lastSpeedError) / dt;
+                
+                let drive = feedforward + P + D;
+                drive = Math.max(-CONFIG.MAX_DRIVE, Math.min(CONFIG.MAX_DRIVE, drive));
+                
+                // Apply minimum speed threshold
+                if (Math.abs(drive) > 0 && Math.abs(drive) < CONFIG.MIN_DRIVE) {
+                    drive = drive > 0 ? CONFIG.MIN_DRIVE : -CONFIG.MIN_DRIVE;
+                }
+                
+                this.lastSpeedError = distanceError;
+                this.lastSpeedTime = now;
+                
+                return Math.round(drive);
+            }
+            
+            reset() {
+                this.lastPositionError = 0;
+                this.lastVelocityError = 0;
+                this.velocityIntegral = 0;
+                this.lastSpeedError = 0;
+                this.lastPositionTime = Date.now();
+                this.lastSpeedTime = Date.now();
             }
         }
 
-        // if no person → take first object
-        if (!target && predictions.length > 0) {
-            target = predictions[0];
+        // ============ MOTION PREDICTOR WITH MEMORY ============
+        class MotionPredictor {
+            constructor() {
+                this.history = [];
+                this.maxHistory = 10;
+                this.velocity = { x: 0, y: 0 };
+                this.acceleration = { x: 0, y: 0 };
+                this.lastPosition = null;
+                this.lastTime = Date.now();
+                this.predictedPosition = null;
+                this.lostFrames = 0;
+                this.lastSeenDirection = null;
+            }
+            
+            update(position) {
+                const now = Date.now();
+                const dt = Math.max((now - this.lastTime) / 1000, 0.01);
+                
+                if (this.lastPosition) {
+                    // Calculate velocity
+                    const newVelX = (position.x - this.lastPosition.x) / dt;
+                    const newVelY = (position.y - this.lastPosition.y) / dt;
+                    
+                    // Smooth velocity with exponential moving average
+                    this.velocity.x = CONFIG.VELOCITY_ALPHA * newVelX + (1 - CONFIG.VELOCITY_ALPHA) * this.velocity.x;
+                    this.velocity.y = CONFIG.VELOCITY_ALPHA * newVelY + (1 - CONFIG.VELOCITY_ALPHA) * this.velocity.y;
+                    
+                    // Remember direction
+                    const speed = Math.sqrt(this.velocity.x ** 2 + this.velocity.y ** 2);
+                    if (speed > 10) {
+                        this.lastSeenDirection = Math.atan2(this.velocity.y, this.velocity.x);
+                    }
+                }
+                
+                this.history.push({ ...position, time: now });
+                if (this.history.length > this.maxHistory) {
+                    this.history.shift();
+                }
+                
+                this.lastPosition = position;
+                this.lastTime = now;
+                this.lostFrames = 0;
+                this.predictedPosition = null;
+            }
+            
+            predict(framesAhead = CONFIG.PREDICTION_HORIZON) {
+                if (!this.lastPosition) return null;
+                
+                this.lostFrames++;
+                
+                // Use constant velocity model with damping for lost frames
+                const damping = Math.exp(-this.lostFrames * 0.1);
+                const dt = framesAhead / 60; // Assume 60 FPS
+                
+                const predicted = {
+                    x: this.lastPosition.x + this.velocity.x * dt * damping,
+                    y: this.lastPosition.y + this.velocity.y * dt * damping,
+                    confidence: Math.max(0, 1 - this.lostFrames / CONFIG.LOST_TIMEOUT)
+                };
+                
+                this.predictedPosition = predicted;
+                return predicted;
+            }
+            
+            getVelocity() {
+                return this.velocity;
+            }
+            
+            getDirection() {
+                return this.lastSeenDirection;
+            }
+            
+            isLost() {
+                return this.lostFrames > CONFIG.LOST_TIMEOUT;
+            }
+            
+            reset() {
+                this.history = [];
+                this.velocity = { x: 0, y: 0 };
+                this.lastPosition = null;
+                this.predictedPosition = null;
+                this.lostFrames = 0;
+                this.lastSeenDirection = null;
+            }
         }
 
-        if (target) {
-            let [x, y, w, h] = target.bbox;
-            let cx = x + w/2;
-            let cy = y + h/2;
-
-            // Draw box
-            ctx.strokeStyle = "lime";
-            ctx.lineWidth = 3;
-            ctx.strokeRect(x, y, w, h);
-
-            // Draw center dot
-            ctx.beginPath();
-            ctx.arc(cx, cy, 8, 0, Math.PI*2);
-            ctx.fillStyle = "yellow";
-            ctx.fill();
-
-            // Show label
-            ctx.fillStyle = "white";
-            ctx.font = "20px Arial";
-            ctx.fillText(target.class, x, y-5);
-
-            // Direction logic
-            giveDirection(cx, cy, w, h);
-        } else {
-            cmdBox.innerText = "No object detected";
+        // ============ OBSTACLE AVOIDANCE MANAGER ============
+        class ObstacleManager {
+            constructor() {
+                this.sensors = {
+                    fl: 100, fc: 100, fr: 100,
+                    l: 100, c: 100, r: 100
+                };
+                this.lastUpdate = Date.now();
+                this.enabled = true;
+            }
+            
+            updateSensors(sensorData) {
+                this.sensors = { ...this.sensors, ...sensorData };
+                this.lastUpdate = Date.now();
+                this.updateDisplay();
+            }
+            
+            checkPath(direction) {
+                // direction: 'forward', 'left', 'right', 'backward'
+                const stopDist = CONFIG.OBSTACLE_STOP_DISTANCE;
+                const slowDist = CONFIG.OBSTACLE_SLOW_DISTANCE;
+                
+                let isClear = true;
+                let needsSlow = false;
+                let alternateDirection = null;
+                
+                if (direction === 'forward') {
+                    if (this.sensors.fc < stopDist || this.sensors.fl < stopDist || this.sensors.fr < stopDist) {
+                        isClear = false;
+                        // Suggest alternate direction
+                        if (this.sensors.l > this.sensors.r) alternateDirection = 'left';
+                        else alternateDirection = 'right';
+                    } else if (this.sensors.fc < slowDist) {
+                        needsSlow = true;
+                    }
+                } else if (direction === 'left') {
+                    if (this.sensors.l < stopDist || this.sensors.fl < stopDist) {
+                        isClear = false;
+                    }
+                } else if (direction === 'right') {
+                    if (this.sensors.r < stopDist || this.sensors.fr < stopDist) {
+                        isClear = false;
+                    }
+                }
+                
+                return { isClear, needsSlow, alternateDirection };
+            }
+            
+            modifyCommand(drive, steer) {
+                if (!this.enabled) return { drive, steer };
+                
+                let modifiedDrive = drive;
+                let modifiedSteer = steer;
+                
+                // Forward motion check
+                if (drive > 0) {
+                    const pathCheck = this.checkPath('forward');
+                    if (!pathCheck.isClear) {
+                        modifiedDrive = 0;
+                        log('🚧 Obstacle ahead - STOPPED', 'warn');
+                        
+                        // Try to steer around
+                        if (pathCheck.alternateDirection === 'left') {
+                            modifiedSteer = -60;
+                        } else if (pathCheck.alternateDirection === 'right') {
+                            modifiedSteer = 60;
+                        }
+                    } else if (pathCheck.needsSlow) {
+                        modifiedDrive = Math.min(drive, CONFIG.MIN_DRIVE + 10);
+                        log('⚠️ Obstacle near - SLOWING', 'warn');
+                    }
+                }
+                
+                // Steering check
+                if (steer < -30) {
+                    const pathCheck = this.checkPath('left');
+                    if (!pathCheck.isClear) {
+                        modifiedSteer = Math.max(steer, -20);
+                        log('🚧 Obstacle left - LIMITED TURN', 'warn');
+                    }
+                } else if (steer > 30) {
+                    const pathCheck = this.checkPath('right');
+                    if (!pathCheck.isClear) {
+                        modifiedSteer = Math.min(steer, 20);
+                        log('🚧 Obstacle right - LIMITED TURN', 'warn');
+                    }
+                }
+                
+                return { drive: modifiedDrive, steer: modifiedSteer };
+            }
+            
+            updateDisplay() {
+                ['fl', 'fc', 'fr', 'l', 'c', 'r'].forEach(pos => {
+                    const el = document.getElementById(`sensor-${pos}`);
+                    const dist = this.sensors[pos];
+                    el.innerHTML = `${pos.toUpperCase()}<br>${dist}cm`;
+                    
+                    el.classList.remove('blocked', 'warning');
+                    if (dist < CONFIG.OBSTACLE_STOP_DISTANCE) {
+                        el.classList.add('blocked');
+                    } else if (dist < CONFIG.OBSTACLE_SLOW_DISTANCE) {
+                        el.classList.add('warning');
+                    }
+                });
+            }
+            
+            // Simulate sensors for demo (ESP32 would provide real data)
+            simulateSensors() {
+                this.sensors = {
+                    fl: 80 + Math.random() * 20,
+                    fc: 90 + Math.random() * 20,
+                    fr: 85 + Math.random() * 20,
+                    l: 70 + Math.random() * 30,
+                    c: 95 + Math.random() * 20,
+                    r: 75 + Math.random() * 25
+                };
+                this.updateDisplay();
+            }
         }
 
-        requestAnimationFrame(detectLoop);
-    });
-}
+        // ============ COMMAND GENERATOR - ZERO DELAY ============
+        class CommandGenerator {
+            constructor() {
+                this.pidController = new CascadePID();
+                this.commandQueue = [];
+                this.lastCommand = { drive: 0, steer: 0 };
+            }
+            
+            generate(targetInfo, obstacles) {
+                if (!targetInfo) {
+                    return { drive: 0, steer: 0 };
+                }
+                
+                const { position, distance, velocity, predicted } = targetInfo;
+                
+                // Use predicted position if available
+                const effectivePos = predicted && predicted.confidence > 0.5 ? predicted : position;
+                
+                // Calculate errors
+                const centerX = canvas.width / 2;
+                const positionError = effectivePos.x - centerX;
+                const normalizedError = positionError / (canvas.width / 2);
+                
+                // Distance control
+                const distanceError = (distance - CONFIG.OPTIMAL_DISTANCE) / CONFIG.OPTIMAL_DISTANCE;
+                
+                // Generate commands with cascade PID
+                let steer = this.pidController.computeSteering(
+                    normalizedError,
+                    velocity.x,
+                    predicted ? velocity.x : 0
+                );
+                
+                let drive = this.pidController.computeDrive(
+                    distanceError,
+                    predicted ? velocity.y : 0
+                );
+                
+                // Apply obstacle avoidance
+                if (obstacles) {
+                    const modified = obstacles.modifyCommand(drive, steer);
+                    drive = modified.drive;
+                    steer = modified.steer;
+                }
+                
+                this.lastCommand = { drive, steer };
+                return { drive, steer };
+            }
+            
+            reset() {
+                this.pidController.reset();
+                this.lastCommand = { drive: 0, steer: 0 };
+            }
+        }
 
-// 4. Direction Logic
-function giveDirection(cx, cy, w, h) {
-    let midX = canvas.width / 2;
-    let midY = canvas.height / 2;
+        // ============ ADVANCED PERSON TRACKER ============
+        class AdvancedTracker {
+            constructor() {
+                this.trackedPerson = null;
+                this.trackingID = null;
+                this.lostFrames = 0;
+                this.confidence = 0;
+            }
+            
+            update(detections) {
+                if (!detections || detections.length === 0) {
+                    this.lostFrames++;
+                    if (this.lostFrames > CONFIG.LOST_TIMEOUT) {
+                        this.trackedPerson = null;
+                        this.confidence = 0;
+                    }
+                    return null;
+                }
+                
+                // First detection
+                if (!this.trackedPerson) {
+                    const largest = detections.reduce((max, p) => 
+                        (p.bbox[2] * p.bbox[3] > max.bbox[2] * max.bbox[3]) ? p : max
+                    );
+                    this.trackedPerson = largest;
+                    this.confidence = largest.score;
+                    this.lostFrames = 0;
+                    return this.getTargetInfo();
+                }
+                
+                // Track existing person using IOU
+                let bestMatch = null;
+                let bestIOU = 0.15;
+                
+                for (const person of detections) {
+                    const iou = this.calculateIOU(this.trackedPerson.bbox, person.bbox);
+                    if (iou > bestIOU) {
+                        bestIOU = iou;
+                        bestMatch = person;
+                    }
+                }
+                
+                if (bestMatch) {
+                    this.trackedPerson = bestMatch;
+                    this.confidence = bestMatch.score;
+                    this.lostFrames = 0;
+                } else {
+                    this.lostFrames++;
+                }
+                
+                return this.getTargetInfo();
+            }
+            
+            calculateIOU(box1, box2) {
+                const x1 = Math.max(box1[0], box2[0]);
+                const y1 = Math.max(box1[1], box2[1]);
+                const x2 = Math.min(box1[0] + box1[2], box2[0] + box2[2]);
+                const y2 = Math.min(box1[1] + box1[3], box2[1] + box2[3]);
+                
+                if (x2 < x1 || y2 < y1) return 0;
+                
+                const intersection = (x2 - x1) * (y2 - y1);
+                const union = box1[2] * box1[3] + box2[2] * box2[3] - intersection;
+                
+                return intersection / union;
+            }
+            
+            getTargetInfo() {
+                if (!this.trackedPerson) return null;
+                
+                const [x, y, w, h] = this.trackedPerson.bbox;
+                const centerX = x + w / 2;
+                const centerY = y + h / 2;
+                
+                return {
+                    bbox: this.trackedPerson.bbox,
+                    position: { x: centerX, y: centerY },
+                    size: { width: w, height: h },
+                    confidence: this.confidence,
+                    age: this.lostFrames
+                };
+            }
+            
+            reset() {
+                this.trackedPerson = null;
+                this.lostFrames = 0;
+                this.confidence = 0;
+            }
+        }
 
-    let tol = 40;
-    let dist = w * h;
+        // ============ JOYSTICK CONTROL ============
+        class VirtualJoystick {
+            constructor(containerId, stickId) {
+                this.container = document.getElementById(containerId);
+                this.stick = document.getElementById(stickId);
+                this.active = false;
+                this.centerX = 0;
+                this.centerY = 0;
+                this.maxDistance = 60;
+                this.currentX = 0;
+                this.currentY = 0;
+                
+                this.setupEvents();
+            }
+            
+            setupEvents() {
+                this.stick.addEventListener('mousedown', this.start.bind(this));
+                this.stick.addEventListener('touchstart', this.start.bind(this));
+                
+                document.addEventListener('mousemove', this.move.bind(this));
+                document.addEventListener('touchmove', this.move.bind(this));
+                
+                document.addEventListener('mouseup', this.end.bind(this));
+                document.addEventListener('touchend', this.end.bind(this));
+            }
+            
+            start(e) {
+                e.preventDefault();
+                this.active = true;
+                const rect = this.container.getBoundingClientRect();
+                this.centerX = rect.left + rect.width / 2;
+                this.centerY = rect.top + rect.height / 2;
+            }
+            
+            move(e) {
+                if (!this.active) return;
+                e.preventDefault();
+                
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                
+                let dx = clientX - this.centerX;
+                let dy = clientY - this.centerY;
+                
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance > this.maxDistance) {
+                    dx = (dx / distance) * this.maxDistance;
+                    dy = (dy / distance) * this.maxDistance;
+                }
+                
+                this.currentX = dx;
+                this.currentY = dy;
+                
+                this.stick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+            }
+            
+            end(e) {
+                if (!this.active) return;
+                e.preventDefault();
+                
+                this.active = false;
+                this.currentX = 0;
+                this.currentY = 0;
+                this.stick.style.transform = 'translate(-50%, -50%)';
+            }
+            
+            getCommand() {
+                const steer = Math.round((this.currentX / this.maxDistance) * 100);
+                const drive = Math.round((-this.currentY / this.maxDistance) * 100);
+                return { drive, steer };
+            }
+        }
 
-    let cmd = "";
+        // ============ INITIALIZE SYSTEMS ============
+        targetTracker = new AdvancedTracker();
+        motionPredictor = new MotionPredictor();
+        obstacleManager = new ObstacleManager();
+        commandGenerator = new CommandGenerator();
+        const joystick = new VirtualJoystick('joystick-container', 'joystick-stick');
 
-    // LEFT / RIGHT based on x
-    if (cx < midX - tol) cmd += "Move Right (Object is Left)\n";
-    else if (cx > midX + tol) cmd += "Move Left (Object is Right)\n";
-    else cmd += "Aligned Left/Right ✓\n";
+        // ============ MAIN INITIALIZATION ============
+        async function init() {
+            log('🚀 Advanced Person Follower Starting...', 'info');
+            updateDisplay('modeDisplay', 'INITIALIZING', 'warn');
+            
+            try {
+                espIP = document.getElementById('espIP').value.trim();
+                
+                log('📷 Requesting camera...', 'info');
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { 
+                        facingMode: 'environment',
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
+                });
+                
+                video.srcObject = stream;
+                
+                await new Promise((resolve) => {
+                    video.onloadedmetadata = () => {
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        log(`✅ Camera ready: ${canvas.width}x${canvas.height}`, 'success');
+                        resolve();
+                    };
+                });
+                
+                log('🧠 Loading AI model...', 'info');
+                model = await cocoSsd.load();
+                log('✅ AI model loaded', 'success');
+                
+                systemRunning = true;
+                document.getElementById('startBtn').textContent = 'STOP';
+                document.getElementById('startBtn').classList.add('active');
+                
+                updateDisplay('modeDisplay', 'READY', 'success');
+                log('✅ System READY - Select mode: FOLLOW or REMOTE', 'success');
+                
+                detect();
+                startObstacleSimulation();
+                
+            } catch (e) {
+                log('❌ Error: ' + e.message, 'error');
+                updateDisplay('modeDisplay', 'ERROR', 'error');
+            }
+        }
 
-    // FORWARD / BACK based on size of box
-    if (dist < 80000) cmd += "Go Closer (Object Far)\n";
-    else if (dist > 200000) cmd += "Go Back (Object Too Close)\n";
-    else cmd += "Distance OK ✓\n";
+        function startSystem() {
+            if (systemRunning) {
+                stopSystem();
+            } else {
+                init();
+            }
+        }
 
-    // PERFECT CENTER
-    if (Math.abs(cx - midX) < tol && dist > 80000 && dist < 200000) {
-        cmd = "Perfectly Centered ✔";
-    }
+        function stopSystem() {
+            systemRunning = false;
+            followActive = false;
+            remoteActive = false;
+            currentMode = 'STANDBY';
+            
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+            
+            sendCommand(0, 0);
+            
+            targetTracker.reset();
+            motionPredictor.reset();
+            commandGenerator.reset();
+            
+            document.getElementById('startBtn').textContent = 'START';
+            document.getElementById('startBtn').classList.remove('active');
+            document.getElementById('followBtn').classList.remove('active');
+            document.getElementById('remoteBtn').classList.remove('active');
+            document.getElementById('joystick-container').classList.remove('active');
+            document.getElementById('mode-indicator').classList.remove('active');
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            updateDisplay('modeDisplay', 'STOPPED');
+            log('System stopped', 'info');
+        }
 
-    cmdBox.innerText = cmd;
-}
-</script>
+        function toggleFollow() {
+            if (!systemRunning) {
+                log('⚠️ Start system first!', 'warn');
+                return;
+            }
+            
+            followActive = !followActive;
+            if (followActive) {
+                remoteActive = false;
+                currentMode = 'FOLLOW';
+                document.getElementById('followBtn').classList.add('active');
+                document.getElementById('remoteBtn').classList.remove('active');
+                document.getElementById('joystick-container').classList.remove('active');
+                showModeIndicator('FOLLOW MODE');
+                log('✅ FOLLOW MODE - Autonomous tracking enabled', 'success');
+            } else {
+                currentMode = 'STANDBY';
+                document.getElementById('followBtn').classList.remove('active');
+                sendCommand(0, 0);
+                log('⏸️ Follow mode disabled', 'warn');
+            }
+            updateDisplay('modeDisplay', currentMode);
+        }
 
+        function toggleRemote() {
+            if (!systemRunning) {
+                log('⚠️ Start system first!', 'warn');
+                return;
+            }
+            
+            remoteActive = !remoteActive;
+            if (remoteActive) {
+                followActive = false;
+                currentMode = 'REMOTE';
+                document.getElementById('remoteBtn').classList.add('active');
+                document.getElementById('followBtn').classList.remove('active');
+                document.getElementById('joystick-container').classList.add('active');
+                showModeIndicator('REMOTE CONTROL');
+                log('✅ REMOTE CONTROL - Use joystick to drive', 'success');
+                remoteControlLoop();
+            } else {
+                currentMode = 'STANDBY';
+                document.getElementById('remoteBtn').classList.remove('active');
+                document.getElementById('joystick-container').classList.remove('active');
+                sendCommand(0, 0);
+                log('⏸️ Remote control disabled', 'warn');
+            }
+            updateDisplay('modeDisplay', currentMode);
+        }
+
+        function showModeIndicator(text) {
+            const indicator = document.getElementById('mode-indicator');
+            indicator.textContent = text;
+            indicator.classList.add('active');
+            setTimeout(() => {
+                indicator.classList.remove('active');
+            }, 2000);
+        }
+
+        // ============ DETECTION LOOP ============
+        async function detect() {
+            if (!systemRunning || !model) {
+                requestAnimationFrame(detect);
+                return;
+            }
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            try {
+                const predictions = await model.detect(video);
+                const people = predictions.filter(p => 
+                    p.class === 'person' && p.score >= CONFIG.MIN_CONFIDENCE
+                );
+                
+                // FPS
+                frameCount++;
+                if (Date.now() - lastFPSTime > 1000) {
+                    updateDisplay('fps', frameCount);
+                    frameCount = 0;
+                    lastFPSTime = Date.now();
+                }
+                
+                // Draw all detections
+                people.forEach((person, i) => {
+                    const [x, y, w, h] = person.bbox;
+                    ctx.strokeStyle = 'rgba(255,255,0,0.6)';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x, y, w, h);
+                    ctx.fillStyle = 'rgba(255,255,0,0.8)';
+                    ctx.font = '14px monospace';
+                    ctx.fillText(`P${i+1}: ${(person.score*100).toFixed(0)}%`, x, y-5);
+                });
+                
+                // Update tracker
+                const targetInfo = targetTracker.update(people);
+                
+                if (targetInfo) {
+                    const { bbox, position, confidence } = targetInfo;
+                    
+                    // Draw tracked target
+                    const [x, y, w, h] = bbox;
+                    ctx.strokeStyle = '#00ff00';
+                    ctx.lineWidth = 4;
+                    ctx.strokeRect(x, y, w, h);
+                    ctx.fillStyle = 'rgba(0,255,0,0.15)';
+                    ctx.fillRect(x, y, w, h);
+                    
+                    // Crosshair
+                    ctx.strokeStyle = '#ff0000';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.moveTo(position.x - 25, position.y);
+                    ctx.lineTo(position.x + 25, position.y);
+                    ctx.moveTo(position.x, position.y - 25);
+                    ctx.lineTo(position.x, position.y + 25);
+                    ctx.stroke();
+                    
+                    // Update motion predictor
+                    motionPredictor.update(position);
+                    
+                    // Calculate distance
+                    const centerX = canvas.width / 2;
+                    const centerY = canvas.height / 2;
+                    const dx = position.x - centerX;
+                    const dy = position.y - centerY;
+                    const distance = Math.sqrt(dx*dx + dy*dy);
+                    
+                    // Get velocity
+                    const velocity = motionPredictor.getVelocity();
+                    
+                    // Update displays
+                    updateDisplay('targetStatus', 'LOCKED', '');
+                    updateDisplay('positionDisplay', `${position.x.toFixed(0)}, ${position.y.toFixed(0)}`);
+                    updateDisplay('velocityDisplay', `${velocity.x.toFixed(1)}, ${velocity.y.toFixed(1)}`);
+                    updateDisplay('distanceDisplay', distance.toFixed(0) + 'px');
+                    updateDisplay('predictionDisplay', 'TRACKING');
+                    
+                    // Process in follow mode
+                    if (followActive) {
+                        const command = commandGenerator.generate({
+                            position,
+                            distance,
+                            velocity,
+                            predicted: null
+                        }, obstacleManager);
+                        
+                        sendCommand(command.drive, command.steer);
+                    }
+                    
+                } else {
+                    // Person lost - use prediction
+                    const predicted = motionPredictor.predict();
+                    
+                    if (predicted && predicted.confidence > 0.3) {
+                        // Draw prediction
+                        ctx.strokeStyle = 'rgba(255,255,0,0.8)';
+                        ctx.setLineDash([10, 5]);
+                        ctx.lineWidth = 3;
+                        ctx.beginPath();
+                        ctx.arc(predicted.x, predicted.y, 40, 0, Math.PI * 2);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                        
+                        ctx.fillStyle = '#ffff00';
+                        ctx.font = 'bold 16px monospace';
+                        ctx.fillText('PREDICTED', predicted.x - 40, predicted.y - 50);
+                        
+                        updateDisplay('targetStatus', 'PREDICTING', 'warn');
+                        updateDisplay('predictionDisplay', `${(predicted.confidence*100).toFixed(0)}%`);
+                        
+                        // Continue following predicted position
+                        if (followActive) {
+                            const velocity = motionPredictor.getVelocity();
+                            const centerX = canvas.width / 2;
+                            const centerY = canvas.height / 2;
+                            const dx = predicted.x - centerX;
+                            const dy = predicted.y - centerY;
+                            const distance = Math.sqrt(dx*dx + dy*dy);
+                            
+                            const command = commandGenerator.generate({
+                                position: { x: predicted.x, y: predicted.y },
+                                distance,
+                                velocity,
+                                predicted
+                            }, obstacleManager);
+                            
+                            sendCommand(command.drive, command.steer);
+                        }
+                        
+                        document.getElementById('prediction-trail').classList.add('active');
+                        document.getElementById('prediction-trail').textContent = 
+                            `🎯 Predicting position - Confidence: ${(predicted.confidence*100).toFixed(0)}%`;
+                        
+                    } else {
+                        updateDisplay('targetStatus', 'LOST', 'error');
+                        updateDisplay('predictionDisplay', 'NO DATA');
+                        sendCommand(0, 0);
+                        
+                        document.getElementById('prediction-trail').classList.remove('active');
+                        
+                        ctx.fillStyle = 'rgba(255,0,0,0.7)';
+                        ctx.font = 'bold 28px monospace';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('TARGET LOST', canvas.width/2, canvas.height/2);
+                        ctx.textAlign = 'left';
+                    }
+                }
+                
+                // Draw screen center
+                ctx.strokeStyle = 'rgba(0,255,255,0.4)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo(canvas.width/2, 0);
+                ctx.lineTo(canvas.width/2, canvas.height);
+                ctx.moveTo(0, canvas.height/2);
+                ctx.lineTo(canvas.width, canvas.height/2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                
+            } catch (error) {
+                console.error('Detection error:', error);
+            }
+            
+            requestAnimationFrame(detect);
+        }
+
+        // ============ REMOTE CONTROL LOOP ============
+        function remoteControlLoop() {
+            if (!remoteActive) return;
+            
+            const command = joystick.getCommand();
+            
+            // Apply obstacle avoidance
+            const modified = obstacleManager.modifyCommand(command.drive, command.steer);
+            
+            sendCommand(modified.drive, modified.steer);
+            
+            setTimeout(() => remoteControlLoop(), CONFIG.COMMAND_RATE);
+        }
+
+        // ============ OBSTACLE SIMULATION ============
+        function startObstacleSimulation() {
+            setInterval(() => {
+                if (systemRunning && document.getElementById('obstacleMode').checked) {
+                    obstacleManager.simulateSensors();
+                }
+            }, CONFIG.OBSTACLE_CHECK_RATE);
+        }
+
+        // ============ COMMUNICATION ============
+        let connectionStatus = 'disconnected';
+        let consecutiveErrors = 0;
+        
+        async function sendCommand(drive, steer) {
+            updateDisplay('driveOut', drive, drive !== 0 ? 'warn' : '');
+            updateDisplay('steerOut', steer, steer !== 0 ? 'warn' : '');
+            
+            if (!espIP) return;
+            
+            const now = Date.now();
+            if (now - lastCommandTime < CONFIG.COMMAND_RATE) return;
+            lastCommandTime = now;
+            
+            try {
+                const url = `http://${espIP}/control?drive=${drive}&steer=${steer}`;
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 1500);
+                
+                const response = await fetch(url, {
+                    method: 'GET',
+                    signal: controller.signal,
+                    cache: 'no-cache'
+                });
+                
+                clearTimeout(timeout);
+                
+                if (response.ok) {
+                    consecutiveErrors = 0;
+                    if (connectionStatus !== 'connected') {
+                        connectionStatus = 'connected';
+                        updateConnectionDisplay();
+                        log('✅ ESP32 connected', 'success');
+                    }
+                }
+            } catch (error) {
+                consecutiveErrors++;
+                if (consecutiveErrors >= 3 && connectionStatus !== 'error') {
+                    connectionStatus = 'error';
+                    updateConnectionDisplay();
+                }
+            }
+        }
+
+        function updateConnectionDisplay() {
+            updateDisplay('connectionStatus', 
+                connectionStatus === 'connected' ? 'CONNECTED' : 'DISCONNECTED',
+                connectionStatus === 'connected' ? '' : 'error');
+        }
+
+        function emergencyStop() {
+            followActive = false;
+            remoteActive = false;
+            currentMode = 'EMERGENCY';
+            
+            sendCommand(0, 0);
+            
+            document.getElementById('followBtn').classList.remove('active');
+            document.getElementById('remoteBtn').classList.remove('active');
+            document.getElementById('joystick-container').classList.remove('active');
+            
+            updateDisplay('modeDisplay', 'E-STOP', 'error');
+            log('🛑 EMERGENCY STOP ACTIVATED!', 'error');
+            
+            showModeIndicator('EMERGENCY STOP');
+        }
+
+        // ============ UI HELPERS ============
+        function updateDisplay(id, value, className = '') {
+            const el = document.getElementById(id);
+            if (el) {
+                el.textContent = value;
+                el.className = 'status-value ' + className;
+            }
+        }
+
+        function log(message, type = 'info') {
+            const telemetry = document.getElementById('telemetry');
+            const entry = document.createElement('div');
+            entry.className = 'log ' + type;
+            const time = new Date().toLocaleTimeString();
+            entry.textContent = `[${time}] ${message}`;
+            telemetry.insertBefore(entry, telemetry.firstChild);
+            
+            while (telemetry.children.length > 40) {
+                telemetry.removeChild(telemetry.lastChild);
+            }
+        }
+
+        // ============ CLEANUP ============
+        window.addEventListener('beforeunload', () => {
+            if (systemRunning) {
+                sendCommand(0, 0);
+                if (video.srcObject) {
+                    video.srcObject.getTracks().forEach(track => track.stop());
+                }
+            }
+        });
+
+        // Auto-start
+        setTimeout(() => init(), 500);
+    </script>
 </body>
 </html>
