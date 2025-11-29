@@ -240,6 +240,206 @@
             document.getElementById('joystick').classList.remove('active');
         }
 
+        // ============ ADVANCED OBJECT TRACKER ============
+        class ObjectTracker {
+            constructor() {
+                this.trackedObject = null;
+                this.trackID = null;
+                this.history = [];
+                this.maxHistory = 5;
+                this.lostFrames = 0;
+                this.velocity = { x: 0, y: 0 };
+                this.lastPosition = null;
+                this.lastTime = Date.now();
+                this.confidence = 0;
+            }
+            
+            update(detections) {
+                if (!detections || detections.length === 0) {
+                    this.lostFrames++;
+                    
+                    // Use prediction if recently lost
+                    if (this.lostFrames < CONFIG.LOST_TIMEOUT && this.lastPosition) {
+                        return this.predictPosition();
+                    }
+                    
+                    if (this.lostFrames > CONFIG.LOST_TIMEOUT) {
+                        this.reset();
+                    }
+                    return null;
+                }
+                
+                // Initial lock - select largest person
+                if (!this.trackedObject) {
+                    this.trackedObject = detections.reduce((max, p) => 
+                        (p.bbox[2] * p.bbox[3] > max.bbox[2] * max.bbox[3]) ? p : max
+                    );
+                    this.confidence = this.trackedObject.score;
+                    this.trackID = Date.now();
+                    log('🎯 Target LOCKED', 'success');
+                    return this.processDetection(this.trackedObject);
+                }
+                
+                // Multi-criteria tracking
+                let bestMatch = null;
+                let bestScore = 0;
+                
+                for (const detection of detections) {
+                    // 1. IOU matching (position similarity)
+                    const iou = this.calcIOU(this.trackedObject.bbox, detection.bbox);
+                    
+                    // 2. Size similarity
+                    const sizeRatio = Math.min(
+                        this.getArea(detection.bbox) / this.getArea(this.trackedObject.bbox),
+                        this.getArea(this.trackedObject.bbox) / this.getArea(detection.bbox)
+                    );
+                    
+                    // 3. Predicted position matching
+                    const predicted = this.predictPosition();
+                    let predictionScore = 0;
+                    if (predicted) {
+                        const [dx, dy, dw, dh] = detection.bbox;
+                        const detCenter = { x: dx + dw/2, y: dy + dh/2 };
+                        const dist = Math.sqrt(
+                            Math.pow(detCenter.x - predicted.centerX, 2) + 
+                            Math.pow(detCenter.y - predicted.centerY, 2)
+                        );
+                        predictionScore = Math.max(0, 1 - dist / 200);
+                    }
+                    
+                    // Weighted scoring
+                    const score = (
+                        iou * 0.5 +                    // 50% position
+                        sizeRatio * 0.3 +              // 30% size
+                        predictionScore * 0.2          // 20% prediction
+                    );
+                    
+                    if (score > bestScore && score > 0.3) {
+                        bestScore = score;
+                        bestMatch = detection;
+                    }
+                }
+                
+                if (bestMatch) {
+                    // Update tracking
+                    this.trackedObject = bestMatch;
+                    this.confidence = bestMatch.score * bestScore;
+                    this.lostFrames = 0;
+                    
+                    return this.processDetection(bestMatch);
+                } else {
+                    this.lostFrames++;
+                    return this.predictPosition();
+                }
+            }
+            
+            processDetection(detection) {
+                const [x, y, w, h] = detection.bbox;
+                const centerX = x + w/2;
+                const centerY = y + h/2;
+                
+                // Update velocity
+                const now = Date.now();
+                if (this.lastPosition) {
+                    const dt = (now - this.lastTime) / 1000;
+                    const vx = (centerX - this.lastPosition.x) / dt;
+                    const vy = (centerY - this.lastPosition.y) / dt;
+                    
+                    // Smooth velocity with exponential moving average
+                    this.velocity.x = 0.3 * vx + 0.7 * this.velocity.x;
+                    this.velocity.y = 0.3 * vy + 0.7 * this.velocity.y;
+                }
+                
+                // Update history
+                this.history.push({ x: centerX, y: centerY, time: now });
+                if (this.history.length > this.maxHistory) {
+                    this.history.shift();
+                }
+                
+                this.lastPosition = { x: centerX, y: centerY };
+                this.lastTime = now;
+                
+                return {
+                    bbox: detection.bbox,
+                    centerX,
+                    centerY,
+                    width: w,
+                    height: h,
+                    confidence: this.confidence,
+                    velocity: { ...this.velocity },
+                    isPredicted: false
+                };
+            }
+            
+            predictPosition() {
+                if (!this.lastPosition || this.lostFrames > CONFIG.LOST_TIMEOUT) {
+                    return null;
+                }
+                
+                // Constant velocity model with decay
+                const dt = this.lostFrames * 0.033; // Assume 30 FPS
+                const decay = Math.exp(-this.lostFrames * 0.1);
+                
+                const predictedX = this.lastPosition.x + this.velocity.x * dt * decay;
+                const predictedY = this.lastPosition.y + this.velocity.y * dt * decay;
+                
+                // Estimate bbox from last known
+                const lastBbox = this.trackedObject ? this.trackedObject.bbox : [0, 0, 100, 100];
+                const predictedBbox = [
+                    predictedX - lastBbox[2]/2,
+                    predictedY - lastBbox[3]/2,
+                    lastBbox[2],
+                    lastBbox[3]
+                ];
+                
+                const confidence = Math.max(0, (1 - this.lostFrames / CONFIG.LOST_TIMEOUT)) * 0.7;
+                
+                return {
+                    bbox: predictedBbox,
+                    centerX: predictedX,
+                    centerY: predictedY,
+                    width: lastBbox[2],
+                    height: lastBbox[3],
+                    confidence: confidence,
+                    velocity: { ...this.velocity },
+                    isPredicted: true
+                };
+            }
+            
+            calcIOU(box1, box2) {
+                const x1 = Math.max(box1[0], box2[0]);
+                const y1 = Math.max(box1[1], box2[1]);
+                const x2 = Math.min(box1[0] + box1[2], box2[0] + box2[2]);
+                const y2 = Math.min(box1[1] + box1[3], box2[1] + box2[3]);
+                
+                if (x2 < x1 || y2 < y1) return 0;
+                
+                const intersection = (x2-x1) * (y2-y1);
+                const union = box1[2]*box1[3] + box2[2]*box2[3] - intersection;
+                return intersection / union;
+            }
+            
+            getArea(bbox) {
+                return bbox[2] * bbox[3];
+            }
+            
+            isActive() {
+                return this.trackedObject !== null && this.lostFrames < CONFIG.LOST_TIMEOUT;
+            }
+            
+            reset() {
+                this.trackedObject = null;
+                this.trackID = null;
+                this.history = [];
+                this.lostFrames = 0;
+                this.velocity = { x: 0, y: 0 };
+                this.lastPosition = null;
+                this.confidence = 0;
+            }
+        }
+        
+        const objectTracker = new ObjectTracker();
+
         // ============ DETECTION LOOP ============
         async function detectLoop() {
             if (!systemRunning || !model) {
@@ -264,67 +464,66 @@
                     fpsTime = Date.now();
                 }
                 
-                // Draw all detections
+                // Draw all detections (dimmed)
                 people.forEach((p, i) => {
                     const [x, y, w, h] = p.bbox;
-                    ctx.strokeStyle = 'rgba(255,255,0,0.5)';
-                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = 'rgba(255,255,0,0.3)';
+                    ctx.lineWidth = 1;
                     ctx.strokeRect(x, y, w, h);
-                    ctx.fillStyle = '#ff0';
-                    ctx.font = '12px monospace';
-                    ctx.fillText(`P${i+1}`, x, y-5);
+                    ctx.fillStyle = 'rgba(255,255,0,0.5)';
+                    ctx.font = '10px monospace';
+                    ctx.fillText(`${Math.round(p.score*100)}%`, x+5, y+15);
                 });
                 
-                // Track person
-                let targetInfo = null;
+                // Update object tracker
+                const targetInfo = objectTracker.update(people);
                 
-                if (people.length > 0) {
-                    // Find tracked or largest person
-                    if (!trackedPerson) {
-                        trackedPerson = people.reduce((max, p) => 
-                            (p.bbox[2] * p.bbox[3] > max.bbox[2] * max.bbox[3]) ? p : max
-                        );
-                        log('🎯 Target locked', 'success');
+                if (targetInfo) {
+                    // Process target for control
+                    const screenCenterX = canvas.width / 2;
+                    const screenCenterY = canvas.height / 2;
+                    
+                    const posError = (targetInfo.centerX - screenCenterX) / screenCenterX;
+                    const distance = Math.sqrt(
+                        Math.pow(targetInfo.centerX - screenCenterX, 2) + 
+                        Math.pow(targetInfo.centerY - screenCenterY, 2)
+                    );
+                    
+                    const enrichedInfo = {
+                        ...targetInfo,
+                        posError,
+                        distance
+                    };
+                    
+                    // Draw tracking visualization
+                    if (targetInfo.isPredicted) {
+                        drawPredictedTarget(enrichedInfo);
+                        updateUI('target', 'PREDICTING', 'warn');
                     } else {
-                        // Track by IOU
-                        let bestMatch = null;
-                        let bestIOU = 0.2;
-                        
-                        for (const p of people) {
-                            const iou = calcIOU(trackedPerson.bbox, p.bbox);
-                            if (iou > bestIOU) {
-                                bestIOU = iou;
-                                bestMatch = p;
-                            }
-                        }
-                        
-                        if (bestMatch) {
-                            trackedPerson = bestMatch;
-                            lostFrames = 0;
-                        } else {
-                            lostFrames++;
-                        }
+                        drawTrackedTarget(enrichedInfo);
+                        updateUI('target', 'LOCKED', '');
                     }
                     
-                    if (trackedPerson && lostFrames < CONFIG.LOST_TIMEOUT) {
-                        targetInfo = processTarget(trackedPerson);
-                        drawTarget(targetInfo);
+                    updateUI('pos', `${Math.round(targetInfo.centerX)}, ${Math.round(targetInfo.centerY)}`, '');
+                    updateUI('dist', `${Math.round(distance)}px`, '');
+                    
+                    // Follow mode control
+                    if (followMode) {
+                        const cmd = calculateCommand(enrichedInfo);
+                        sendCommand(cmd.drive, cmd.steer);
                     }
                 } else {
-                    lostFrames++;
-                }
-                
-                // Lost target
-                if (lostFrames >= CONFIG.LOST_TIMEOUT) {
-                    trackedPerson = null;
                     updateUI('target', 'LOST', 'error');
+                    updateUI('pos', '-', '');
+                    updateUI('dist', '-', '');
                     if (followMode) sendCommand(0, 0);
-                }
-                
-                // Follow mode control
-                if (followMode && targetInfo) {
-                    const cmd = calculateCommand(targetInfo);
-                    sendCommand(cmd.drive, cmd.steer);
+                    
+                    // Draw "target lost" message
+                    ctx.fillStyle = 'rgba(255,0,0,0.7)';
+                    ctx.font = 'bold 24px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('TARGET LOST', canvas.width/2, canvas.height/2);
+                    ctx.textAlign = 'left';
                 }
                 
                 // Draw center crosshair
